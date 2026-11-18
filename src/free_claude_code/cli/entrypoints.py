@@ -53,3 +53,24 @@ def profile(argv: Sequence[str] | None = None) -> None:
     from free_claude_code.cli.profiles import main
 
     main(argv)
+
+
+def approvals(argv: Sequence[str] | None = None) -> None:
+    """Decide pending privileged-action approvals (``fcc-approvals``)."""
+    from free_claude_code.cli.approvals import main
+
+    main(argv)
+
+
+def audit(argv: Sequence[str] | None = None) -> None:
+    """Inspect the terminal command audit log (registered as ``fcc-audit``)."""
+    from free_claude_code.cli.audit import main
+
+    main(argv)
+
+
+def exec_command(argv: Sequence[str] | None = None) -> None:
+    """Run one command through policy enforcement (registered as ``fcc-exec``)."""
+    from free_claude_code.cli.runner import main
+
+    main(argv)
