@@ -74,27 +74,35 @@ class TerminalExecutor:
         )
         started = time.monotonic()
         try:
-            process = processes.spawn(spec.argv, cwd=spec.cwd, env=spec.env)
+            process = processes.spawn(
+                spec.argv,
+                cwd=spec.cwd,
+                env=spec.env,
+                inherit_stdio=spec.inherit_stdio,
+                isolated=spec.isolated,
+            )
         except (OSError, ValueError) as exc:
             raise SpawnError(spec.argv, str(exc)) from exc
         self._sink.record(
             make_event("started", task, spec.argv, spec.cwd, policy_id=policy.policy_id)
         )
 
-        if process.stdout is None or process.stderr is None:
-            processes.kill_tree(process)
-            processes.untrack(process)
-            raise SpawnError(spec.argv, "child stdio pipes were not created")
         stdout_capture = _Capture()
         stderr_capture = _Capture()
-        readers = [
-            self._start_reader(
-                process.stdout, "stdout", stdout_capture, spec, started, on_output
-            ),
-            self._start_reader(
-                process.stderr, "stderr", stderr_capture, spec, started, on_output
-            ),
-        ]
+        readers: list[threading.Thread] = []
+        if not spec.inherit_stdio:
+            if process.stdout is None or process.stderr is None:
+                processes.kill_tree(process)
+                processes.untrack(process)
+                raise SpawnError(spec.argv, "child stdio pipes were not created")
+            readers = [
+                self._start_reader(
+                    process.stdout, "stdout", stdout_capture, spec, started, on_output
+                ),
+                self._start_reader(
+                    process.stderr, "stderr", stderr_capture, spec, started, on_output
+                ),
+            ]
 
         timed_out = False
         cancelled = False

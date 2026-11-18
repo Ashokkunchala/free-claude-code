@@ -14,9 +14,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 from free_claude_code.config.paths import server_log_path
+from free_claude_code.terminal import processes as terminal_processes
 
 AUTOSTART_ENV = "FCC_AUTOSTART"
 AUTOSTART_TIMEOUT_SECONDS = 45.0
@@ -71,21 +71,14 @@ def _spawn_detached_server() -> bool:
         return False
     log = _open_log()
     owned = log is not subprocess.DEVNULL
-    kwargs: dict[str, Any] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": log,
-        "stderr": subprocess.STDOUT,
-        "close_fds": True,
-        "cwd": str(Path.home()),
-    }
-    if os.name == "nt":
-        kwargs["creationflags"] = (
-            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        )
-    else:
-        kwargs["start_new_session"] = True
     try:
-        subprocess.Popen(command, **kwargs)
+        terminal_processes.spawn_detached(
+            command,
+            cwd=str(Path.home()),
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
     except OSError:
         return False
     finally:

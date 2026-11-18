@@ -17,6 +17,10 @@ class CommandSpec:
     ``env`` replaces the inherited environment when given (allowlist semantics);
     ``None`` inherits ``os.environ``. ``pty`` requests pseudo-terminal
     allocation and is only honored for explicitly interactive call sites.
+    ``inherit_stdio`` attaches the child to the caller's terminal instead of
+    capturing output (interactive flows); the result then carries empty output
+    fields and streaming callbacks never fire. ``isolated=False`` keeps the
+    child in the caller's process group so terminal signals reach it directly.
     """
 
     argv: tuple[str, ...]
@@ -25,6 +29,8 @@ class CommandSpec:
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     output_cap_bytes: int = DEFAULT_OUTPUT_CAP_BYTES
     pty: bool = False
+    inherit_stdio: bool = False
+    isolated: bool = True
 
     def __post_init__(self) -> None:
         if not self.argv:
@@ -50,6 +56,8 @@ class CommandSpec:
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         output_cap_bytes: int = DEFAULT_OUTPUT_CAP_BYTES,
         pty: bool = False,
+        inherit_stdio: bool = False,
+        isolated: bool = True,
     ) -> CommandSpec:
         """Build a spec from any sequence, validating eagerly."""
 
@@ -60,6 +68,8 @@ class CommandSpec:
             timeout_seconds=timeout_seconds,
             output_cap_bytes=output_cap_bytes,
             pty=pty,
+            inherit_stdio=inherit_stdio,
+            isolated=isolated,
         )
 
 

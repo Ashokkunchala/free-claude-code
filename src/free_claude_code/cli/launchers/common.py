@@ -14,6 +14,7 @@ from free_claude_code.cli.process_registry import (
     register_pid,
     unregister_pid,
 )
+from free_claude_code.terminal import processes as terminal_processes
 
 PROXY_PREFLIGHT_PATH = "/health"
 PROXY_PREFLIGHT_TIMEOUT_SECONDS = 1.5
@@ -80,7 +81,11 @@ def run_client_process(
 
     process: subprocess.Popen[bytes] | None = None
     try:
-        process = subprocess.Popen(command, env=dict(env))
+        # Interactive harness UX: inherit the terminal, stay in the caller's
+        # process group so Ctrl+C reaches the client, manage our own lifecycle.
+        process = terminal_processes.spawn(
+            command, env=env, inherit_stdio=True, isolated=False, track=False
+        )
         if process.pid:
             register_pid(process.pid)
         return_code = process.wait()

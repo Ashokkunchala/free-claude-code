@@ -14,7 +14,7 @@ import signal
 import subprocess
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from loguru import logger
@@ -26,29 +26,77 @@ _tracked: dict[int, subprocess.Popen[bytes]] = {}
 
 
 def spawn(
-    argv: tuple[str, ...],
+    argv: Sequence[str],
     *,
-    cwd: str | None,
-    env: Mapping[str, str] | None,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    inherit_stdio: bool = False,
+    isolated: bool = True,
+    track: bool = True,
 ) -> subprocess.Popen[bytes]:
-    """Start a child with piped output in its own process group."""
+    """Start a child process.
+
+    ``isolated`` (default) gives the child its own process group on POSIX /
+    CREATE_NEW_PROCESS_GROUP on Windows so tree kills never touch the caller;
+    interactive launchers pass ``isolated=False`` to keep Ctrl+C semantics.
+    ``inherit_stdio`` leaves stdin/stdout/stderr attached to the caller's
+    terminal instead of piping them for capture. ``track`` adds the child to
+    the executor's orphan-sweep table; callers managing their own lifecycle
+    (launchers, detached servers) opt out.
+    """
+
+    kwargs: dict[str, Any] = {}
+    if cwd is not None:
+        kwargs["cwd"] = cwd
+    if env is not None:
+        kwargs["env"] = dict(env)
+    if not inherit_stdio:
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.PIPE
+    if isolated:
+        if os.name == "nt":
+            kwargs["creationflags"] = (
+                subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+            )
+        else:
+            kwargs["start_new_session"] = True
+    process = cast("subprocess.Popen[bytes]", subprocess.Popen(argv, **kwargs))
+    if track and process.pid:
+        with _lock:
+            _tracked[process.pid] = process
+    return process
+
+
+def spawn_detached(
+    argv: Sequence[str],
+    *,
+    cwd: str,
+    stdin: Any,
+    stdout: Any,
+    stderr: Any,
+) -> subprocess.Popen[bytes]:
+    """Start a fully detached background process (e.g. the autostarted server).
+
+    Detached processes outlive the caller by design, so they are neither
+    tracked for orphan sweeps nor registered in the atexit net.
+    """
 
     kwargs: dict[str, Any] = {
+        "stdin": stdin,
+        "stdout": stdout,
+        "stderr": stderr,
+        "close_fds": True,
         "cwd": cwd,
-        "env": dict(env) if env is not None else None,
-        "stdout": subprocess.PIPE,
-        "stderr": subprocess.PIPE,
     }
     if os.name == "nt":
         kwargs["creationflags"] = (
-            subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+            (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+            if os.name == "nt"
+            else 0
         )
     else:
         kwargs["start_new_session"] = True
-    process = cast(subprocess.Popen[bytes], subprocess.Popen(argv, **kwargs))
-    with _lock:
-        _tracked[process.pid] = process
-    return process
+    return cast("subprocess.Popen[bytes]", subprocess.Popen(list(argv), **kwargs))
 
 
 def untrack(process: subprocess.Popen[bytes]) -> None:
@@ -88,15 +136,36 @@ def _kill_tree_windows(process: subprocess.Popen[bytes]) -> None:
 
 def _kill_tree_posix(process: subprocess.Popen[bytes]) -> None:
     pid = process.pid
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(pid, signal.SIGTERM)
+    # Isolated children lead their own group; a non-isolated child (launcher
+    # port) is signalled directly so we never hit the caller's group.
+    try:
+        leader = os.getpgid(pid) == pid
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        leader = False
+
+    def term() -> None:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            if leader:
+                os.killpg(pid, signal.SIGTERM)
+            else:
+                os.kill(pid, signal.SIGTERM)
+
+    def kill() -> None:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            if leader:
+                os.killpg(pid, signal.SIGKILL)
+            else:
+                os.kill(pid, signal.SIGKILL)
+
+    term()
     deadline = time.monotonic() + _KILL_ESCALATION_SECONDS
     while time.monotonic() < deadline:
         if process.poll() is not None:
             return
         time.sleep(0.05)
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(pid, signal.SIGKILL)
+    kill()
 
 
 # --- PID registry: atexit safety net migrated from cli.process_registry ---
