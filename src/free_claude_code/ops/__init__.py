@@ -14,6 +14,27 @@ from free_claude_code.ops.diagnostics import (
     rollout_status,
     terraform_diagnostics,
 )
+from free_claude_code.ops.incident import (
+    DEFAULT_LOG_TAIL,
+    IncidentPlan,
+    incident_plan,
+    synthesize_timeline,
+    warning_events,
+)
+from free_claude_code.ops.kubernetes import (
+    DeploymentSummary,
+    EventSummary,
+    PodSummary,
+    describe_pod,
+    get_deployments_json,
+    get_events_json,
+    get_pods_json,
+    parse_deployments,
+    parse_events,
+    parse_pods,
+    pod_logs,
+    unhealthy_pods,
+)
 from free_claude_code.ops.tools import (
     DEVOPS_TOOLS,
     ToolKind,
@@ -22,9 +43,14 @@ from free_claude_code.ops.tools import (
 )
 
 __all__ = [
+    "DEFAULT_LOG_TAIL",
     "DEVOPS_TOOLS",
+    "DeploymentSummary",
     "DiagnosticReport",
     "DiagnosticsRunner",
+    "EventSummary",
+    "IncidentPlan",
+    "PodSummary",
     "Probe",
     "ProbeResult",
     "ToolKind",
@@ -33,9 +59,21 @@ __all__ = [
     "aws_diagnostics",
     "azure_diagnostics",
     "compose_diagnostics",
+    "describe_pod",
     "docker_diagnostics",
     "gcloud_diagnostics",
+    "get_deployments_json",
+    "get_events_json",
+    "get_pods_json",
+    "incident_plan",
     "kubernetes_diagnostics",
+    "parse_deployments",
+    "parse_events",
+    "parse_pods",
+    "pod_logs",
     "rollout_status",
+    "synthesize_timeline",
     "terraform_diagnostics",
+    "unhealthy_pods",
+    "warning_events",
 ]
