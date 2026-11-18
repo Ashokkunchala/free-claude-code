@@ -170,6 +170,7 @@ def apply_and_verify(
     runner: CheckRunner,
     checks: tuple[CheckSpec, ...] | list[CheckSpec],
     rollback_on_failure: bool = True,
+    task_id: str | None = None,
 ) -> VerifiedEdit:
     """Apply one edit, run the gates, and roll back on gate failure.
 
@@ -178,7 +179,7 @@ def apply_and_verify(
     """
 
     edit = edit_file(root, path, content)
-    report = runner.run_all(checks, stop_on_failure=True)
+    report = runner.run_all(checks, stop_on_failure=True, task_id=task_id)
     if report.ok or not rollback_on_failure:
         return VerifiedEdit(edit=edit, report=report, rolled_back=False)
     rollback(edit)
