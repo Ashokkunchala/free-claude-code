@@ -55,7 +55,7 @@ Free-tier availability and limits are controlled by each provider and may change
 macOS/Linux:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.sh" | sh
+curl -fsSL "https://raw.githubusercontent.com/Ashokkunchala/free-claude-code/main/scripts/install.sh" | sh
 ```
 
 Windows PowerShell (recommended bootstrap):
@@ -476,13 +476,13 @@ macOS/Linux:
 Local Whisper on CPU or CUDA:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local
+curl -fsSL "https://raw.githubusercontent.com/Ashokkunchala/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local
 ```
 
 Local Whisper with CUDA 13.0:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
+curl -fsSL "https://raw.githubusercontent.com/Ashokkunchala/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
 ```
 
 Windows PowerShell:
