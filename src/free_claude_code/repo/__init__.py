@@ -30,9 +30,18 @@ from free_claude_code.repo.files import (
 )
 from free_claude_code.repo.git import GitError, GitRepo, GitStatus
 from free_claude_code.repo.ignore import IgnoreRules
+from free_claude_code.repo.repair import (
+    DEFAULT_MAX_ROUNDS,
+    EditProposal,
+    FixFunc,
+    RepairResult,
+    RepairRound,
+    repair_loop,
+)
 
 __all__ = [
     "DEFAULT_MAX_READ_BYTES",
+    "DEFAULT_MAX_ROUNDS",
     "DEFAULT_MAX_SEARCH_FILE_BYTES",
     "DEFAULT_MAX_SEARCH_RESULTS",
     "BinaryFileError",
@@ -42,13 +51,17 @@ __all__ = [
     "CheckRunner",
     "CheckSpec",
     "ConfinementError",
+    "EditProposal",
     "EditResult",
     "FileTooLargeError",
+    "FixFunc",
     "GitError",
     "GitRepo",
     "GitStatus",
     "IgnoreRules",
     "ReadResult",
+    "RepairResult",
+    "RepairRound",
     "RepoFileError",
     "SearchMatch",
     "SearchResult",
@@ -57,6 +70,7 @@ __all__ = [
     "edit_file",
     "python_checks",
     "read_file",
+    "repair_loop",
     "rollback",
     "search_content",
     "search_files",
