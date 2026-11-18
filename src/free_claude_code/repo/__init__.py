@@ -18,6 +18,7 @@ from free_claude_code.repo.files import (
     search_content,
     search_files,
 )
+from free_claude_code.repo.git import GitError, GitRepo, GitStatus
 from free_claude_code.repo.ignore import IgnoreRules
 
 __all__ = [
@@ -28,6 +29,9 @@ __all__ = [
     "ConfinementError",
     "EditResult",
     "FileTooLargeError",
+    "GitError",
+    "GitRepo",
+    "GitStatus",
     "IgnoreRules",
     "ReadResult",
     "RepoFileError",
