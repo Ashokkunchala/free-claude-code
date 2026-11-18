@@ -1,5 +1,15 @@
 """Repository file operations: confined reads, searches, edits, rollback."""
 
+from free_claude_code.repo.checks import (
+    CheckKind,
+    CheckOutcome,
+    CheckReport,
+    CheckRunner,
+    CheckSpec,
+    VerifiedEdit,
+    apply_and_verify,
+    python_checks,
+)
 from free_claude_code.repo.files import (
     DEFAULT_MAX_READ_BYTES,
     DEFAULT_MAX_SEARCH_FILE_BYTES,
@@ -26,6 +36,11 @@ __all__ = [
     "DEFAULT_MAX_SEARCH_FILE_BYTES",
     "DEFAULT_MAX_SEARCH_RESULTS",
     "BinaryFileError",
+    "CheckKind",
+    "CheckOutcome",
+    "CheckReport",
+    "CheckRunner",
+    "CheckSpec",
     "ConfinementError",
     "EditResult",
     "FileTooLargeError",
@@ -37,7 +52,10 @@ __all__ = [
     "RepoFileError",
     "SearchMatch",
     "SearchResult",
+    "VerifiedEdit",
+    "apply_and_verify",
     "edit_file",
+    "python_checks",
     "read_file",
     "rollback",
     "search_content",
