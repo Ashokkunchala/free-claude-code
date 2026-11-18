@@ -91,3 +91,40 @@ def test_missing_binary_raises_spawn_error() -> None:
 
     with pytest.raises(SpawnError):
         TerminalExecutor().run(CommandSpec(argv=("definitely-not-a-real-binary-fcc",)))
+
+
+def test_run_inherit_stdio_captures_nothing(echo_stdout: tuple[str, ...]) -> None:
+    chunks: list[OutputChunk] = []
+    result = TerminalExecutor().run(
+        CommandSpec(argv=echo_stdout, inherit_stdio=True),
+        on_output=chunks.append,
+    )
+    assert result.ok
+    assert result.stdout == b""
+    assert result.stderr == b""
+    assert not result.stdout_truncated
+    assert chunks == []
+
+
+def test_run_non_isolated_child_shares_process_group(
+    echo_stdout: tuple[str, ...],
+) -> None:
+    import os
+
+    if os.name == "nt":
+        pytest.skip("process-group check is POSIX-only")
+    result = TerminalExecutor().run(
+        CommandSpec(argv=echo_stdout, isolated=False),
+    )
+    assert result.ok
+
+
+def test_spec_rejects_still_validates_with_new_fields() -> None:
+    import sys
+
+    spec = CommandSpec.of(
+        [sys.executable, "-c", "pass"], inherit_stdio=True, isolated=False
+    )
+    assert spec.inherit_stdio
+    assert not spec.isolated
+    assert spec.timeout_seconds > 0
