@@ -74,3 +74,10 @@ def exec_command(argv: Sequence[str] | None = None) -> None:
     from free_claude_code.cli.runner import main
 
     main(argv)
+
+
+def inspect(argv: Sequence[str] | None = None) -> None:
+    """Read-only repository inspection (registered as ``fcc-inspect``)."""
+    from free_claude_code.cli.inspect import main
+
+    main(argv)
