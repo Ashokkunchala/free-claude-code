@@ -35,6 +35,14 @@ from free_claude_code.ops.kubernetes import (
     pod_logs,
     unhealthy_pods,
 )
+from free_claude_code.ops.terraform import (
+    DriftReport,
+    DriftStatus,
+    parse_plan_summary,
+    plan_probe,
+    review_drift,
+    state_list_probe,
+)
 from free_claude_code.ops.tools import (
     DEVOPS_TOOLS,
     ToolKind,
@@ -48,6 +56,8 @@ __all__ = [
     "DeploymentSummary",
     "DiagnosticReport",
     "DiagnosticsRunner",
+    "DriftReport",
+    "DriftStatus",
     "EventSummary",
     "IncidentPlan",
     "PodSummary",
@@ -69,9 +79,13 @@ __all__ = [
     "kubernetes_diagnostics",
     "parse_deployments",
     "parse_events",
+    "parse_plan_summary",
     "parse_pods",
+    "plan_probe",
     "pod_logs",
+    "review_drift",
     "rollout_status",
+    "state_list_probe",
     "synthesize_timeline",
     "terraform_diagnostics",
     "unhealthy_pods",

@@ -456,6 +456,11 @@ def _classify_verb_command(name: str, args: tuple[str, ...]) -> tuple[RiskLevel,
             return RiskLevel.R0_READ_ONLY, f"{name}:version"
         if verbs and verbs[0] in ("plan", "validate", "show", "output"):
             return RiskLevel.R1_REVERSIBLE, f"{name}:read"
+        if verbs[:1] == ["state"]:
+            # `state pull` prints the raw state, secrets included.
+            if len(verbs) >= 2 and verbs[1] == "list":
+                return RiskLevel.R1_REVERSIBLE, f"{name}:state-read"
+            return RiskLevel.R2_PRIVILEGED, f"{name}:state-write"
         return RiskLevel.R2_PRIVILEGED, f"{name}:other"
     if name in ("kubectl", "helm"):
         destructive = {"delete", "drain", "uninstall"}

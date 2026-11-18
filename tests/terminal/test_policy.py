@@ -327,3 +327,16 @@ def test_docker_compose_mutations_stay_privileged() -> None:
     ):
         level, _ = classify(argv)
         assert level is RiskLevel.R2_PRIVILEGED, argv
+
+
+def test_terraform_state_list_is_low_risk_but_mutations_stay_gated() -> None:
+    level, _ = classify(("terraform", "state", "list"))
+    assert level is RiskLevel.R1_REVERSIBLE
+    for argv in (
+        ("terraform", "state", "pull"),
+        ("terraform", "state", "mv", "a", "b"),
+        ("terraform", "state", "rm", "x"),
+        ("tofu", "state", "push"),
+    ):
+        level, _ = classify(argv)
+        assert level is RiskLevel.R2_PRIVILEGED, argv
