@@ -259,7 +259,7 @@ def edit_file(root: Path, path: str | Path, new_content: str) -> EditResult:
         prefix=resolved.name + ".", dir=str(resolved.parent)
     )
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as output:
             output.write(new_content)
         os.replace(temp_name, resolved)
     except BaseException:
@@ -283,7 +283,7 @@ def rollback(result: EditResult) -> None:
         return
     if result.backup_content is None:
         raise RepoFileError("edit result has no backup content")
-    path.write_text(result.backup_content, encoding="utf-8")
+    path.write_text(result.backup_content, encoding="utf-8", newline="")
 
 
 __all__ = [
