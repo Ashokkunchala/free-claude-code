@@ -55,16 +55,26 @@ Free-tier availability and limits are controlled by each provider and may change
 macOS/Linux:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.sh" | sh
+curl -fsSL "https://raw.githubusercontent.com/Ashokkunchala/free-claude-code/main/scripts/install.sh" | sh
 ```
 
-Windows PowerShell:
+Windows PowerShell (recommended bootstrap):
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.ps1")))
+git clone https://github.com/Ashokkunchala/free-claude-code.git
+cd free-claude-code
+py -3.14 install_fcc.py --claude-only
 ```
 
-When prompted, choose at least one coding agent and optionally RTK. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
+The Python bootstrap validates and starts this repository's official PowerShell installer. It does not require your system Python patch version to match the package pin: `uv` provisions the Python runtime required by this checkout. Your existing Python installation is left unchanged.
+
+You can also run the official PowerShell installer directly:
+
+```powershell
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Ashokkunchala/free-claude-code/main/scripts/install.ps1")))
+```
+
+The `--claude-only` option skips installation and verification of Codex, Pi, OpenCode, Cline, Hermes, DeepSeek Harness, Grok Build, Muse Code, and Aider. It does not remove any tools already on your machine. To use the full multi-agent installer instead, omit `--claude-only`. You can review the installers before running them: [install.sh](scripts/install.sh), [install.ps1](scripts/install.ps1), and [install_fcc.py](install_fcc.py).
 
 ### 2. Start FCC
 
@@ -466,13 +476,13 @@ macOS/Linux:
 Local Whisper on CPU or CUDA:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local
+curl -fsSL "https://raw.githubusercontent.com/Ashokkunchala/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local
 ```
 
 Local Whisper with CUDA 13.0:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
+curl -fsSL "https://raw.githubusercontent.com/Ashokkunchala/free-claude-code/main/scripts/install.sh" | sh -s -- --voice-local --torch-backend cu130
 ```
 
 Windows PowerShell:
