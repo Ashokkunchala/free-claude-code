@@ -48,7 +48,8 @@ def test_validate_installer_passes_path_through_environment(
     installer = tmp_path / "folder with spaces" / "install.ps1"
     installer.parent.mkdir()
     installer.write_text("Write-Output 'ok'\n", encoding="utf-8")
-    captured: dict[str, object] = {}
+    captured_path: list[str] = []
+    captured_command: list[list[str]] = []
 
     def fake_run(
         command: list[str],
@@ -58,16 +59,15 @@ def test_validate_installer_passes_path_through_environment(
         capture_output: bool,
         check: bool,
     ) -> subprocess.CompletedProcess[str]:
-        captured["command"] = command
-        captured["env"] = env
-        captured["text"] = text
-        captured["capture_output"] = capture_output
-        captured["check"] = check
+        captured_command.append(command)
+        captured_path.append(env["FCC_INSTALLER_TO_VALIDATE"])
+        assert text is True
+        assert capture_output is True
+        assert check is False
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     validate_installer("powershell.exe", installer)
 
-    assert captured["env"]["FCC_INSTALLER_TO_VALIDATE"] == str(installer.resolve())
-    assert "$env:FCC_INSTALLER_TO_VALIDATE" in captured["command"][-1]
-    assert captured["check"] is False
+    assert captured_path == [str(installer.resolve())]
+    assert "$env:FCC_INSTALLER_TO_VALIDATE" in captured_command[0][-1]
