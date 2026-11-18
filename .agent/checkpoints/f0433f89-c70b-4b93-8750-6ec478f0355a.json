@@ -1,0 +1,22 @@
+[
+  {
+    "id": "cp_6cf082ad",
+    "label": "write",
+    "tool": "write",
+    "ts": "2026-10-19T08:16:57.692Z",
+    "paths": [
+      "C:\\Users\\Ashok Kunchala\\Desktop\\free-claude-code\\Dockerfile"
+    ],
+    "before": {
+      "C:\\Users\\Ashok Kunchala\\Desktop\\free-claude-code\\Dockerfile": {
+        "existed": false
+      }
+    },
+    "after": {
+      "C:\\Users\\Ashok Kunchala\\Desktop\\free-claude-code\\Dockerfile": {
+        "existed": true,
+        "content": "# Multi-stage Dockerfile for Free Claude Code\n# Stage 1: Build\nFROM python:3.14.7-slim AS builder\n\n# Install uv (fast Python package manager)\nCOPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv\n\nWORKDIR /build\n\n# Copy dependency files\nCOPY pyproject.toml uv.lock ./\n\n# Install dependencies in editable mode\n# We use the optional voice_local extra only if needed\nRUN uv sync --frozen --no-dev --all-extras\n\n# Copy source code\nCOPY src/ ./src/\n\n# Build the package\nRUN uv pip install --no-deps -e .\n\n# Stage 2: Runtime\nFROM python:3.14.7-slim\n\n# Install runtime dependencies\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n    curl \\\n    ca-certificates \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Install uv\nCOPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv\n\nWORKDIR /app\n\n# Copy built package from builder\nCOPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages\nCOPY --from=builder /usr/local/bin /usr/local/bin\n\n# Copy assets if needed (for Admin UI)\nCOPY assets/ /app/assets/\n\n# Create non-root user\nRUN useradd -m -u 1000 fcc && \\\n    chown -R fcc:fcc /app\n\nUSER fcc\n\n# Expose ports\n# 8000: Admin UI\n# 8001: Proxy API\nEXPOSE 8000 8001\n\n# Health check\nHEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \\\n    CMD curl -f http://localhost:8000/health || exit 1\n\n# Run the server\nCMD [\"fcc-server\"]"
+      }
+    }
+  }
+]
