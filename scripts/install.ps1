@@ -3,6 +3,7 @@ param(
     [string] $TorchBackend = "",
     [switch] $Rtk,
     [switch] $DryRun,
+    [switch] $ClaudeOnly,
     [switch] $Help,
     [Parameter(ValueFromRemainingArguments = $true)]
     [object[]] $RemainingArgs = @()
@@ -42,6 +43,18 @@ $script:InstallAider = $true
 $script:PiAvailable = $false
 $script:MuseAvailable = $false
 $script:EnableRtk = $Rtk.IsPresent
+if ($ClaudeOnly) {
+    $script:InstallClaudeCode = $true
+    $script:InstallCodex = $false
+    $script:InstallPi = $false
+    $script:InstallOpenCode = $false
+    $script:InstallCline = $false
+    $script:InstallHermes = $false
+    $script:InstallDsh = $false
+    $script:InstallGrok = $false
+    $script:InstallMuse = $false
+    $script:InstallAider = $false
+}
 $FccCommands = @(
     # Include retired entry points so updates reject older FCC processes before replacement.
     "fcc-desktop",
@@ -72,6 +85,7 @@ Options:
   -VoiceLocal            Install local Whisper voice transcription support.
   -TorchBackend VALUE    Use a uv PyTorch backend, such as cu130. Requires local voice.
   -Rtk                   Install and configure RTK for the selected coding agents.
+  -ClaudeOnly            Install/verify Claude Code only; skip every other coding agent.
   -DryRun                Print commands without running them.
   -Help                  Show this help text.
 "@
@@ -1626,13 +1640,13 @@ if ((-not [string]::IsNullOrWhiteSpace($TorchBackend)) -and (-not $VoiceLocal)) 
 }
 
 # Preserve the user's winning command before adding installer search paths.
-$script:OriginalOpenCode = Get-ApplicationCommand "opencode"
+$script:OriginalOpenCode = if ($ClaudeOnly) { $null } else { Get-ApplicationCommand "opencode" }
 Add-KnownBinDirectories
 $script:InstallCline = [bool] ((Get-ApplicationCommand "cline") -or (Get-ApplicationCommand "npm"))
 Write-Step "Checking for running Free Claude Code processes"
 Assert-NoFccProcessesRunning
 
-if (-not (Test-InteractiveInstaller)) {
+if ((-not $ClaudeOnly) -and (-not (Test-InteractiveInstaller))) {
     $hasDsh = [bool] (Get-ApplicationCommand "dsh")
     $hasDryRunToolchain = [bool] (
         $DryRun -and
@@ -1642,9 +1656,13 @@ if (-not (Test-InteractiveInstaller)) {
     $script:InstallDsh = $hasDsh -or $hasDryRunToolchain -or (Test-DshToolchain)
 }
 
-if (Test-InteractiveInstaller) {
+if ((-not $ClaudeOnly) -and (Test-InteractiveInstaller)) {
     Write-Step "Choosing coding agents"
     Select-CodingAgents
+}
+elseif ($ClaudeOnly) {
+    Write-Step "Claude-only mode"
+    Write-Host "Only Claude Code will be installed or verified. Other coding agents will be skipped."
 }
 
 Write-Step "Ensuring uv $MinUvVersion or newer is installed"
