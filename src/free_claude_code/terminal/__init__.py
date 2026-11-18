@@ -1,5 +1,10 @@
 """Terminal execution core: structured, auditable, cancellable commands."""
 
+from free_claude_code.terminal.approval import (
+    ApprovalCheck,
+    ApprovalTokenIssuer,
+    command_fingerprint,
+)
 from free_claude_code.terminal.audit import (
     AuditEvent,
     AuditSink,
@@ -13,6 +18,13 @@ from free_claude_code.terminal.errors import (
     TerminalExecutorError,
 )
 from free_claude_code.terminal.executor import TerminalExecutor
+from free_claude_code.terminal.policy import (
+    PolicyConfig,
+    PolicyEngine,
+    PolicyVerdict,
+    Requirement,
+    RiskLevel,
+)
 from free_claude_code.terminal.redaction import Redactor
 from free_claude_code.terminal.result import CommandResult, OutputChunk
 from free_claude_code.terminal.spec import (
@@ -23,6 +35,8 @@ from free_claude_code.terminal.spec import (
 
 __all__ = [
     "DEFAULT_POLICY_DECISION",
+    "ApprovalCheck",
+    "ApprovalTokenIssuer",
     "AuditEvent",
     "AuditSink",
     "CommandResult",
@@ -31,10 +45,16 @@ __all__ = [
     "JsonlAuditSink",
     "NullAuditSink",
     "OutputChunk",
+    "PolicyConfig",
     "PolicyDecision",
+    "PolicyEngine",
     "PolicyRejectedError",
+    "PolicyVerdict",
     "Redactor",
+    "Requirement",
+    "RiskLevel",
     "SpawnError",
     "TerminalExecutor",
     "TerminalExecutorError",
+    "command_fingerprint",
 ]
