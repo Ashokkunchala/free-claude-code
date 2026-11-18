@@ -13,6 +13,7 @@ _PACKAGE_NAME = "free_claude_code"
 ALLOWED_PACKAGE_DEPENDENCIES: dict[str, set[str]] = {
     "updater": set(),
     "terminal": set(),
+    "repo": {"terminal"},
     "config": {"core"},
     "core": set(),
     "application": {"config", "core"},
