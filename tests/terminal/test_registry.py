@@ -29,6 +29,9 @@ def test_kill_all_empty_is_noop() -> None:
     processes.kill_all_best_effort()
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="os.getpgid is POSIX-only; Windows uses taskkill"
+)
 def test_kill_all_survives_os_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(processes, "_registry_pids", {99999})
 
