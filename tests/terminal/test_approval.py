@@ -1,6 +1,7 @@
 """Approval token tests: binding, expiry and tamper resistance."""
 
 import time
+from pathlib import Path
 
 import pytest
 
@@ -61,10 +62,14 @@ def test_wrong_command_rejected() -> None:
     assert check.reason == "token not bound to this command"
 
 
-def test_wrong_cwd_rejected() -> None:
+def test_wrong_cwd_rejected(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
     issuer = make_issuer()
-    token = issuer.mint(make_spec("ls", cwd="/tmp"), "task-1")
-    check = issuer.verify(token, make_spec("ls", cwd="/var"), "task-1")
+    token = issuer.mint(make_spec("ls", cwd=str(first)), "task-1")
+    check = issuer.verify(token, make_spec("ls", cwd=str(second)), "task-1")
     assert not check.ok
 
 
@@ -95,8 +100,8 @@ def test_malformed_tokens_rejected() -> None:
         assert not check.ok, bad
 
 
-def test_fingerprint_is_order_and_cwd_sensitive() -> None:
+def test_fingerprint_is_order_and_cwd_sensitive(tmp_path: Path) -> None:
     first = command_fingerprint(make_spec("a", "b"))
     assert first != command_fingerprint(make_spec("b", "a"))
-    assert first != command_fingerprint(make_spec("a", "b", cwd="/tmp"))
+    assert first != command_fingerprint(make_spec("a", "b", cwd=str(tmp_path)))
     assert first == command_fingerprint(make_spec("a", "b"))
