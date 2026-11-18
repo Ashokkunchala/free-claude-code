@@ -11,8 +11,8 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 
 def find_repository(requested: Path | None = None) -> Path:
@@ -32,10 +32,9 @@ def find_repository(requested: Path | None = None) -> Path:
             if directory in visited:
                 continue
             visited.add(directory)
-            if (
-                (directory / "pyproject.toml").is_file()
-                and (directory / "scripts" / "install.ps1").is_file()
-            ):
+            if (directory / "pyproject.toml").is_file() and (
+                directory / "scripts" / "install.ps1"
+            ).is_file():
                 return directory
 
     raise FileNotFoundError(
