@@ -5,6 +5,10 @@ from free_claude_code.terminal.approval import (
     ApprovalTokenIssuer,
     command_fingerprint,
 )
+from free_claude_code.terminal.approval_store import (
+    ApprovalRecord,
+    FileApprovalStore,
+)
 from free_claude_code.terminal.audit import (
     AuditEvent,
     AuditSink,
@@ -36,11 +40,13 @@ from free_claude_code.terminal.spec import (
 __all__ = [
     "DEFAULT_POLICY_DECISION",
     "ApprovalCheck",
+    "ApprovalRecord",
     "ApprovalTokenIssuer",
     "AuditEvent",
     "AuditSink",
     "CommandResult",
     "CommandSpec",
+    "FileApprovalStore",
     "InMemoryAuditSink",
     "JsonlAuditSink",
     "NullAuditSink",

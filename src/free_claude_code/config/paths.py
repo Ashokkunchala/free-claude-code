@@ -22,6 +22,9 @@ CODE_DATABASE_FILENAME = "code.db"
 CODE_LOCK_FILENAME = "code.lock"
 USAGE_DAILY_FILENAME = "usage-daily.json"
 PROFILES_FILENAME = "profiles.json"
+APPROVALS_FILENAME = "approvals.json"
+APPROVAL_SECRET_FILENAME = "approval-secret"
+AUDIT_LOG_FILENAME = "audit.jsonl"
 
 
 def config_dir_path() -> Path:
@@ -95,6 +98,24 @@ def profiles_path() -> Path:
     """Return the per-project preferred-model profile store path."""
 
     return config_dir_path() / PROFILES_FILENAME
+
+
+def approvals_path() -> Path:
+    """Return the approval request store path."""
+
+    return config_dir_path() / APPROVALS_FILENAME
+
+
+def approval_secret_path() -> Path:
+    """Return the approval-token signing secret path."""
+
+    return config_dir_path() / AUTH_DIRNAME / APPROVAL_SECRET_FILENAME
+
+
+def audit_log_path() -> Path:
+    """Return the terminal command audit log path."""
+
+    return config_dir_path() / FCC_LOGS_DIRNAME / AUDIT_LOG_FILENAME
 
 
 def codex_model_catalog_path() -> Path:
