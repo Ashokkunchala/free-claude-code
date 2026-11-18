@@ -32,15 +32,36 @@ const VIEW_GROUPS = [
     id: "providers",
     label: "Providers",
     title: "Providers",
-    sections: [],
+    sections: ["runtime"],
     containerId: "providersSections",
   },
   {
     id: "model_config",
     label: "Model Config",
     title: "Model Config",
-    sections: ["models"],
+    sections: ["models", "reasoning", "web_tools"],
     containerId: "modelConfigSections",
+  },
+  {
+    id: "messaging",
+    label: "Messaging",
+    title: "Messaging",
+    sections: ["messaging", "voice"],
+    containerId: "messagingSections",
+  },
+  {
+    id: "integrations",
+    label: "Integrations",
+    title: "Integrations",
+    sections: [],
+    containerId: "view-integrations",
+  },
+  {
+    id: "code",
+    label: "Code sessions",
+    title: "Code sessions",
+    sections: [],
+    containerId: "codeRoot",
   },
 ];
 
@@ -132,6 +153,12 @@ function renderStartup() {
   state.config.provider_status.forEach((provider) => {
     renderProviderCheckResult(provider.provider_id);
   });
+  renderClaudeIntegration();
+  renderVSCodeChatIntegration();
+  renderJetBrainsIntegration();
+  renderCodexIntegration();
+  renderClaudeDesktopIntegration();
+  renderDshDesktopIntegration();
 }
 
 async function refreshStartup() {
@@ -155,10 +182,17 @@ async function refreshStartup() {
     )) return;
     state.startup = result;
     renderStartup();
+    refreshIntegrationUpdates(
+      previous?.instance_id === result.instance_id ? previous.startup.integrations : null,
+      current.integrations,
+    );
     const changed = !previous || previous.instance_id !== result.instance_id ||
       JSON.stringify(previous.startup) !== JSON.stringify(current);
     if (changed) void hydrateModelOptions();
+    if (changed) void window.CodeSessions?.refresh(result);
     pending = current.catalog === "starting" || current.catalog_file === "starting" ||
+      current.code?.state === "starting" || current.messaging?.state === "starting" ||
+      Object.values(current.integrations || {}).some((update) => update.state === "starting") ||
       Object.values(current.providers || {}).includes("starting");
   } catch (error) {
     if (error.name !== "AbortError") pending = true;
@@ -320,7 +354,9 @@ async function load({ providersOnly = false } = {}) {
   showMessage("Loading admin config");
   const config = await api("/admin/api/config");
   config.custom_providers ||= [];
+  config.provider_status.push(...config.custom_providers.map((provider) => ({ ...provider, kind: "custom", status: "configured", settings_keys: [], missing_configuration_keys: [] })));
   state.config = config;
+  window.CodeSessions.setProviderNames(config.custom_providers);
   state.startup = null;
   state.fields = new Map(config.fields.map((field) => [field.key, field]));
   if (!providersOnly) renderNav();
@@ -334,6 +370,8 @@ async function load({ providersOnly = false } = {}) {
     refreshConnectedAccounts(),
     hydrateModelOptions(),
   ]);
+  if (providersOnly) void window.CodeSessions.refresh();
+  else window.CodeSessions.initialize(api);
   if (state.config !== config) return;
   updateDirtyState();
   showMessage("");
@@ -364,14 +402,16 @@ function setActiveView(viewId, { scroll = false } = {}) {
     VIEW_GROUPS.find((view) => view.id === viewId) || VIEW_GROUPS[0];
   state.activeView = activeView.id;
   byId("pageTitle").textContent = activeView.title;
+  if (activeView.id === "code") void window.CodeSessions.refresh();
   renderStartup();
   void refreshStartup();
   if (activeView.id === "providers") void liveStatusLoop();
   else clearTimeout(state.liveStatusTimer);
-  document.querySelector(".app-shell").classList.remove("session-active");
-  document.querySelector(".main").classList.remove("session-main");
-  document.querySelector(".topbar").hidden = false;
-  document.querySelector(".action-bar").hidden = false;
+  const sessionActive = activeView.id === "code";
+  document.querySelector(".app-shell").classList.toggle("session-active", sessionActive);
+  document.querySelector(".main").classList.toggle("session-main", sessionActive);
+  document.querySelector(".topbar").hidden = sessionActive;
+  document.querySelector(".action-bar").hidden = sessionActive || activeView.id === "integrations";
 
   document.querySelectorAll(".nav-link").forEach((link) => {
     const selected = link.dataset.view === activeView.id;
@@ -392,6 +432,16 @@ function setActiveView(viewId, { scroll = false } = {}) {
   if (scroll) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
+  if (activeView.id === "code") window.CodeSessions.activate(window.location.pathname);
+  else window.CodeSessions.deactivate();
+  if (activeView.id === "integrations") {
+    refreshClaudeIntegration();
+    refreshVSCodeChatIntegration();
+    refreshJetBrainsIntegration();
+    refreshCodexIntegration();
+    refreshClaudeDesktopIntegration();
+    refreshDshDesktopIntegration();
+  }
 }
 
 function navigateToView(viewId) {
@@ -406,8 +456,8 @@ function renderProviders(providerStatus) {
   const container = byId("providerGroups");
   container.replaceChildren();
   [
-    ["cloud", "API key providers"],
-    ["oauth", "Sign-in providers"],
+    ["oauth", "OAuth providers"],
+    ["cloud", "Cloud providers"],
     ["local", "Local providers"],
   ].forEach(([kind, label]) => {
     const group = document.createElement("section");
@@ -417,10 +467,10 @@ function renderProviders(providerStatus) {
     heading.textContent = label;
     group.appendChild(heading);
     const subgroups = [
-      ["configured", "Configured"],
-      ["unconfigured", "Add an API key"],
-      ["loading", "Connecting accounts"],
+      ["configured", kind === "oauth" ? "Connected" : "Configured"],
+      ["unconfigured", kind === "oauth" ? "Not connected" : "Not configured"],
     ];
+    if (kind === "oauth") subgroups.unshift(["loading", "Checking account status"]);
     subgroups.forEach(([subgroupId, subgroupLabel]) => {
       const subgroup = document.createElement("div");
       subgroup.dataset.providerSubgroup = subgroupId;
@@ -436,7 +486,6 @@ function renderProviders(providerStatus) {
     });
     container.appendChild(group);
   });
-  providerStatus.forEach(updateProviderCard);
   const custom = document.createElement("section");
   custom.className = "provider-strip";
   custom.dataset.providerGroup = "custom";
@@ -456,7 +505,7 @@ function renderProviders(providerStatus) {
   header.append(heading, add);
   custom.append(header, empty, grid);
   container.appendChild(custom);
-  state.config.custom_providers.forEach(updateProviderCard);
+  providerStatus.forEach(updateProviderCard);
 }
 
 function updateProviderCard(provider) {
@@ -1102,7 +1151,7 @@ function createModelCombobox(input, field) {
   return new window.FccModelCombobox(input, {
     listboxId: `model-options-${field.key}`,
     label: field.label,
-    displayValue: modelDisplayValue,
+    displayValue: (value) => state.modelLabels.get(value) || value,
     values: () =>
       field.type === "optional_model"
         ? ["None", ...state.modelOptions]

@@ -140,11 +140,7 @@ def load_config_response(snapshot: ManagedConfigSnapshot) -> JsonObject:
                 "reasoning_format": provider.reasoning_format,
                 "reasoning_history_format": provider.reasoning_history_format,
                 "model_ids": list(provider.model_ids),
-                "api_key": (
-                    MASKED_SECRET
-                    if provider.api_key is not None
-                    else None
-                ),
+                "api_key": (MASKED_SECRET if provider.api_key is not None else None),
                 "settings_keys": [],
             }
             for provider in snapshot.settings.custom_providers

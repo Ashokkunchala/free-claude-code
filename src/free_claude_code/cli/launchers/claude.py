@@ -4,6 +4,7 @@ import os
 from collections.abc import Sequence
 from pathlib import Path
 
+from free_claude_code.core.json_types import JsonValue
 from free_claude_code.harnesses.claude import CLAUDE_BINARY_NAME, build_claude_proxy_env
 from free_claude_code.harnesses.launch import PreparedLaunch
 from free_claude_code.harnesses.resources import LaunchResources
@@ -18,7 +19,7 @@ def _scoped_settings(args: list[str], files: LaunchResources) -> str | None:
 
     if "--settings" in args:
         return None
-    payload: dict[str, object] = {}
+    payload: dict[str, JsonValue] = {}
     if os.environ.get(STATUSLINE_ENV, "1").strip().lower() not in {"0", "false", "off"}:
         payload["statusLine"] = {
             "type": "command",

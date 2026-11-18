@@ -1,5 +1,6 @@
 """Tests for the persisted daily usage ledger."""
 
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -8,7 +9,7 @@ from free_claude_code.cli import usage_ledger
 
 
 @pytest.fixture(autouse=True)
-def _clean_ledger() -> None:
+def _clean_ledger() -> Iterator[None]:
     usage_ledger.reset()
     yield
     usage_ledger.reset()

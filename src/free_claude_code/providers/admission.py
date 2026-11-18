@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from enum import StrEnum
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from loguru import logger
 
@@ -909,7 +909,7 @@ class ProviderAdmissionController:
             self._limits = limits
             self._wake_capacity()
 
-    def snapshot(self) -> JsonObject:
+    def snapshot(self) -> dict[str, Any]:
         """Expose JSON-safe live admission state for operator inspection."""
         now = time.monotonic()
         limits = self._limits

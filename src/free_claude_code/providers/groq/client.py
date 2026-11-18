@@ -64,9 +64,7 @@ _PROFILE = OpenAIChatProfile(
 _REASONING_FIELD = "reasoning_effort"
 _KNOWN_VALUES = frozenset({"none", "default", "low", "medium", "high"})
 _FIELD_PATTERN = re.compile(r"(?<![a-z0-9_])reasoning_effort(?![a-z0-9_])", re.I)
-_ITPM_MARKER = re.compile(
-    r"\binput\s+tokens\s+per\s+minute\s*\(\s*ITPM\s*\)", re.I
-)
+_ITPM_MARKER = re.compile(r"\binput\s+tokens\s+per\s+minute\s*\(\s*ITPM\s*\)", re.I)
 _VALUE_PATTERN = re.compile(
     r"(?<![a-z0-9_])(none|default|low|medium|high)(?![a-z0-9_])",
     re.I,
@@ -112,12 +110,11 @@ class GroqChatBehavior(OpenAIChatBehavior):
             return None
         if _ITPM_MARKER.search(message):
             advice = (
-                "Groq's input tokens per minute (ITPM) limit is lower than this "
-                "request's input size. Changing the output token limit will not "
-                "fix it. FCC will try available free-tier models from other "
-                "configured providers before returning this error. If they are "
-                "also rate-limited, shorten the conversation or try again after "
-                "the provider quota resets."
+                "Groq rejected this request because its input size exceeds the "
+                "account's input tokens per minute (ITPM) token-rate allowance. "
+                "Changing the output token limit will not fix it. Use a model or "
+                "provider with a higher ITPM allowance, shorten the "
+                "conversation, or try again after the provider quota resets."
             )
         else:
             advice = (
@@ -126,10 +123,10 @@ class GroqChatBehavior(OpenAIChatBehavior):
                 "model/provider with a higher allowance."
             )
         return ExecutionFailure(
-            FailureKind.RATE_LIMIT,
-            429,
+            FailureKind.INVALID_REQUEST,
+            400,
             advice,
-            True,
+            False,
         )
 
     def finalize_chat_body(

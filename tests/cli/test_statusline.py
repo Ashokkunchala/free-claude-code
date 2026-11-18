@@ -2,6 +2,7 @@
 
 import io
 import json
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -10,7 +11,7 @@ from free_claude_code.cli import statusline, usage_ledger
 
 
 @pytest.fixture(autouse=True)
-def _clean_ledger() -> None:
+def _clean_ledger() -> Iterator[None]:
     usage_ledger.reset()
     yield
     usage_ledger.reset()

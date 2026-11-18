@@ -333,17 +333,21 @@ def _remove_empty_openai_messages(
     result: list[dict[str, Any]] = []
     for message in messages:
         content = message.get("content")
-        has_content = (
-            isinstance(content, str) and bool(content.strip())
-        ) or (isinstance(content, list) and bool(content))
-        if has_content or message.get("tool_calls"):
+        has_content = (isinstance(content, str) and bool(content.strip())) or (
+            isinstance(content, list) and bool(content)
+        )
+        if (
+            has_content
+            or message.get("tool_calls")
+            or message.get("reasoning_details")
+            or message.get("role") != "tool"
+        ):
             result.append(message)
             continue
-        if message.get("role") == "tool":
-            # Tool replies must remain paired with their tool call, but providers
-            # such as Cohere reject an empty message content field.
-            message["content"] = "[empty tool result]"
-            result.append(message)
+        # Tool replies must remain paired with their tool call, but providers
+        # such as Cohere reject an empty message content field.
+        message["content"] = "[empty tool result]"
+        result.append(message)
     return result
 
 

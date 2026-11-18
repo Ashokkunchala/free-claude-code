@@ -9,7 +9,7 @@ choice never leaks into the user's global configuration or into other projects.
 import json
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -110,7 +110,7 @@ def _write(document: dict[str, Any]) -> None:
         raise ValueError(f"Could not write profiles to {path}: {exc}") from None
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     """CLI for managing per-project model profiles."""
 
     import argparse

@@ -457,6 +457,9 @@ class _Lease:
     def model_info(self, provider_id: str, model_id: str) -> ProviderModelInfo | None:
         return None
 
+    def cached_prefixed_model_infos(self) -> tuple[ProviderModelInfo, ...]:
+        return ()
+
     def is_provider_cached(self, provider_id: str) -> bool:
         del provider_id
         return True
