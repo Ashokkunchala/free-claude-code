@@ -63,7 +63,7 @@ Windows PowerShell (recommended bootstrap):
 ```powershell
 git clone https://github.com/Ashokkunchala/free-claude-code.git
 cd free-claude-code
-py -3.14 install_fcc.py
+py -3.14 install_fcc.py --claude-only
 ```
 
 The Python bootstrap validates and starts this repository's official PowerShell installer. It does not require your system Python patch version to match the package pin: `uv` provisions the Python runtime required by this checkout. Your existing Python installation is left unchanged.
@@ -74,7 +74,7 @@ You can also run the official PowerShell installer directly:
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Ashokkunchala/free-claude-code/main/scripts/install.ps1")))
 ```
 
-When prompted, choose at least one coding agent and optionally RTK. You can review the installers before running them: [install.sh](scripts/install.sh), [install.ps1](scripts/install.ps1), and [install_fcc.py](install_fcc.py).
+The `--claude-only` option skips installation and verification of Codex, Pi, OpenCode, Cline, Hermes, DeepSeek Harness, Grok Build, Muse Code, and Aider. It does not remove any tools already on your machine. To use the full multi-agent installer instead, omit `--claude-only`. You can review the installers before running them: [install.sh](scripts/install.sh), [install.ps1](scripts/install.ps1), and [install_fcc.py](install_fcc.py).
 
 ### 2. Start FCC
 
