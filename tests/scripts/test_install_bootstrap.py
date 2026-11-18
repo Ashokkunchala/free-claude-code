@@ -15,6 +15,7 @@ def test_installer_command_preserves_paths_with_spaces(tmp_path: Path) -> None:
         torch_backend="cu130",
         rtk=True,
         dry_run=True,
+        claude_only=True,
     )
 
     assert command == [
@@ -28,6 +29,7 @@ def test_installer_command_preserves_paths_with_spaces(tmp_path: Path) -> None:
         "-TorchBackend",
         "cu130",
         "-Rtk",
+        "-ClaudeOnly",
         "-DryRun",
     ]
 
@@ -70,3 +72,10 @@ def test_validate_installer_passes_path_through_environment(
 
     assert captured_path == [str(installer.resolve())]
     assert "$env:FCC_INSTALLER_TO_VALIDATE" in captured_command[0][-1]
+
+
+def test_claude_only_flag_is_forwarded(tmp_path: Path) -> None:
+    command = build_installer_command(
+        "powershell.exe", tmp_path / "install.ps1", claude_only=True
+    )
+    assert command[-1] == "-ClaudeOnly"
