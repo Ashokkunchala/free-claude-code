@@ -121,7 +121,6 @@ class ProviderExecutor:
         failure: ExecutionFailure,
         candidate_index: int,
         candidate_count: int,
-        automatic: bool = False,
     ) -> None:
         fields: dict[str, object] = {
             "stage": "execution",
@@ -133,7 +132,6 @@ class ProviderExecutor:
             "to_provider_model_ref": selected.provider_model_ref,
             "candidate_index": candidate_index,
             "candidate_count": candidate_count,
-            "automatic": automatic,
             "failure_kind": failure.kind.value,
             "status_code": failure.status_code,
             "provider_retryable": failure.retryable,
@@ -506,7 +504,6 @@ class ProviderExecutor:
                     failure=candidate_failure,
                     candidate_index=index + 2,
                     candidate_count=len(candidates),
-                    automatic=index + 1 >= automatic_start,
                 )
 
         stream_trace: dict[str, object] = {

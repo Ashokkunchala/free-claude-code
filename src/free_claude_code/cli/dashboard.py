@@ -9,7 +9,7 @@ numbers survive server restarts.
 import argparse
 import json
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.request import Request
 
@@ -109,7 +109,7 @@ def render(status: Mapping[str, Any], ledger: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     """Entry point for the ``fcc-status`` command."""
 
     from free_claude_code.config.loader import get_settings

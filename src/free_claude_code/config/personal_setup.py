@@ -4,4 +4,16 @@ from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
 
 PERSONAL_PROVIDER_IDS = frozenset({"gemini", "groq", "nvidia_nim", "open_router"})
 ADMIN_PROVIDER_IDS = frozenset(PROVIDER_CATALOG)
-PERSONAL_ADMIN_SECTIONS = frozenset({"providers", "models"})
+PERSONAL_ADMIN_SECTIONS = frozenset(
+    {
+        "providers",
+        "models",
+        "reasoning",
+        "runtime",
+        "messaging",
+        "voice",
+        "web_tools",
+        "diagnostics",
+        "smoke",
+    }
+)

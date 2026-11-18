@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from free_claude_code.config.paths import server_log_path
 
@@ -70,7 +71,7 @@ def _spawn_detached_server() -> bool:
         return False
     log = _open_log()
     owned = log is not subprocess.DEVNULL
-    kwargs: dict[str, object] = {
+    kwargs: dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
         "stdout": log,
         "stderr": subprocess.STDOUT,

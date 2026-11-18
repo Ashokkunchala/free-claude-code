@@ -1,5 +1,6 @@
 """Tests for per-project model profiles."""
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,7 @@ from free_claude_code.cli import profiles
 
 
 @pytest.fixture(autouse=True)
-def _clean_profiles() -> None:
+def _clean_profiles() -> Iterator[None]:
     yield
     for directory in list(profiles.list_profiles()):
         profiles.clear(directory)

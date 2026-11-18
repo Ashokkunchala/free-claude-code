@@ -139,12 +139,10 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "model_list",
         settings_attr="model_fallbacks",
         description=(
-            "FCC automatically discovers free-tier models from your configured "
-            "Gemini, Groq, NVIDIA NIM, and free OpenRouter model lists when a "
-            "request hits a token or rate limit. Add entries here only to control "
-            "fallback order. OpenRouter alternatives are limited to models marked "
-            ":free. Providers do not consistently expose account billing tier, so "
-            "Gemini, Groq, and NVIDIA NIM keys should be on their free plans."
+            "Tried in order when the selected provider/model fails before output "
+            "starts. Applies to every client. One request may reach multiple "
+            "providers and consume usage at each. Native Anthropic Messages requests "
+            "use only other Anthropic models as fallbacks."
         ),
     ),
     ConfigFieldSpec(
