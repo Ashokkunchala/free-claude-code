@@ -7,6 +7,7 @@ without touching unrelated processes. Interactive harness launchers keep
 their existing behavior until they migrate.
 """
 
+import atexit
 import contextlib
 import os
 import signal
@@ -96,3 +97,82 @@ def _kill_tree_posix(process: subprocess.Popen[bytes]) -> None:
         time.sleep(0.05)
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(pid, signal.SIGKILL)
+
+
+# --- PID registry: atexit safety net migrated from cli.process_registry ---
+#
+# The registry tracks PIDs (not Popen handles) so an interrupted caller can
+# still clean up children it no longer holds references to. cli.process_registry
+# re-exports these; its public API is unchanged.
+_registry_lock = threading.Lock()
+_registry_pids: set[int] = set()
+_atexit_registered = False
+
+
+def ensure_atexit_registered() -> None:
+    global _atexit_registered
+    with _registry_lock:
+        if _atexit_registered:
+            return
+        atexit.register(kill_all_best_effort)
+        _atexit_registered = True
+
+
+def register_pid(pid: int) -> None:
+    if not pid:
+        return
+    ensure_atexit_registered()
+    with _registry_lock:
+        _registry_pids.add(int(pid))
+
+
+def unregister_pid(pid: int) -> None:
+    if not pid:
+        return
+    with _registry_lock:
+        _registry_pids.discard(int(pid))
+
+
+def kill_pid_tree_best_effort(pid: int) -> None:
+    """Kill a tracked process and its children where the platform supports it."""
+    if not pid:
+        return
+    if os.name == "nt":
+        try:
+            # /T kills child processes, /F forces termination.
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+        except Exception as e:
+            logger.debug("terminal.processes: taskkill failed pid=%s: %s", pid, e)
+        return
+
+    # POSIX: signal the whole group when the pid leads one (executor children
+    # and detached servers start their own sessions); otherwise the single pid.
+    try:
+        pgid = os.getpgid(pid)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        pgid = -1
+    try:
+        if pgid == pid:
+            os.killpg(pid, signal.SIGTERM)
+        else:
+            os.kill(pid, signal.SIGTERM)
+    except Exception as e:
+        logger.debug("terminal.processes: terminate failed pid=%s: %s", pid, e)
+
+
+def kill_all_best_effort() -> None:
+    """Kill any still-running registered pids (best-effort)."""
+    with _registry_lock:
+        pids = list(_registry_pids)
+        _registry_pids.clear()
+
+    for pid in pids:
+        kill_pid_tree_best_effort(pid)
