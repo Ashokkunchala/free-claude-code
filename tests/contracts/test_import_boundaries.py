@@ -14,6 +14,7 @@ ALLOWED_PACKAGE_DEPENDENCIES: dict[str, set[str]] = {
     "updater": set(),
     "terminal": set(),
     "repo": {"terminal"},
+    "ops": {"terminal"},
     "config": {"core"},
     "core": set(),
     "application": {"config", "core"},
