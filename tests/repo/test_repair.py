@@ -58,7 +58,7 @@ class FakeExecutor(TerminalExecutor):
 def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
-    (root / "app.py").write_text("def main():\n    return 'hello'\n", encoding="utf-8")
+    (root / "app.py").write_bytes(b"def main():\n    return 'hello'\n")
     return root
 
 
