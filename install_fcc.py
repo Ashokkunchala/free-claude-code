@@ -6,8 +6,6 @@ The PowerShell installer provisions the project's pinned Python runtime with uv;
 the Python version used to launch this bootstrapper does not need to match it.
 """
 
-from __future__ import annotations
-
 import argparse
 import os
 import shutil
