@@ -92,6 +92,7 @@ def build_installer_command(
     torch_backend: str | None = None,
     rtk: bool = False,
     dry_run: bool = False,
+    claude_only: bool = False,
 ) -> list[str]:
     command = [
         powershell,
@@ -109,6 +110,8 @@ def build_installer_command(
         command.extend(["-TorchBackend", torch_backend])
     if rtk:
         command.append("-Rtk")
+    if claude_only:
+        command.append("-ClaudeOnly")
     if dry_run:
         command.append("-DryRun")
     return command
@@ -136,6 +139,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--rtk",
         action="store_true",
         help="Install and configure RTK.",
+    )
+    parser.add_argument(
+        "--claude-only",
+        action="store_true",
+        help="Install or verify Claude Code only; skip all other coding agents.",
     )
     parser.add_argument(
         "--dry-run",
@@ -176,6 +184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             torch_backend=args.torch_backend,
             rtk=args.rtk,
             dry_run=args.dry_run,
+            claude_only=args.claude_only,
         )
 
         print("\n[2/2] Starting the official installer...")
@@ -192,6 +201,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("\nFree Claude Code installer completed.")
             print("Open a NEW PowerShell window, then run:")
             print("  fcc-server --version")
+            print("  fcc-claude")
             print("  fcc-doctor")
             print("  fcc-server")
         return 0
