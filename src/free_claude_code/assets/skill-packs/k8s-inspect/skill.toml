@@ -1,0 +1,23 @@
+name = "k8s-inspect"
+version = "0.1.0"
+purpose = "Read-only Kubernetes inspection: contexts, workloads, events, logs and rollout status"
+platforms = ["linux", "macos", "windows"]
+required_tools = ["kubectl"]
+max_risk = "r1"
+approval_from = "r2"
+timeout_seconds = 600
+rollback = "Read-only inspection only; no rollback applies"
+verification = ["kubectl config current-context reported with every finding", "Every claim cites a kubectl command and its output"]
+executable = false
+
+[[tools]]
+name = "workload-status"
+description = "Summarize deployments, pods, restart counts and recent events in one namespace"
+timeout_seconds = 120
+max_output_bytes = 524288
+
+[[tools]]
+name = "pod-evidence"
+description = "Capture describe, logs and events for one pod as incident evidence"
+timeout_seconds = 120
+max_output_bytes = 524288

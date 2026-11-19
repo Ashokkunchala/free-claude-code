@@ -15,6 +15,7 @@ from typing import Any
 from free_claude_code.skills import SkillPack, discover_packs, load_pack
 from free_claude_code.skills.state import (
     SkillState,
+    bundled_packs_dir,
     default_packs_dir,
     default_state_path,
 )
@@ -161,6 +162,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="Root under which executable packs may load (repeatable; "
         "default: the packs directory itself)",
     )
+    parser.add_argument(
+        "--no-bundled",
+        action="store_true",
+        help="Skip the skill packs bundled with FCC (testing and automation)",
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -186,9 +192,21 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     state = SkillState((args.state or default_state_path()).resolve())
 
+    def discover_all() -> list[SkillPack]:
+        packs = discover_packs(packs_root, trusted)
+        if args.no_bundled:
+            return packs
+        bundled_root = bundled_packs_dir()
+        if bundled_root.resolve() == packs_root:
+            return packs
+        merged = {pack.name: pack for pack in discover_packs(bundled_root, trusted)}
+        for pack in packs:  # user packs shadow bundled packs of the same name
+            merged[pack.name] = pack
+        return sorted(merged.values(), key=lambda pack: pack.name)
+
     try:
         if args.command == "list":
-            _print_packs(discover_packs(packs_root, trusted), state, as_json=args.json)
+            _print_packs(discover_all(), state, as_json=args.json)
         elif args.command == "validate":
             if args.path is not None:
                 paths = [args.path.resolve()]
@@ -200,8 +218,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 )
             sys.exit(_validate(paths, trusted, as_json=args.json))
         else:
-            packs = discover_packs(packs_root, trusted)
-            pack = _find(packs, args.name)
+            pack = _find(discover_all(), args.name)
             if pack is None:
                 print(f"Unknown skill pack: {args.name}", file=sys.stderr)
                 sys.exit(2)
