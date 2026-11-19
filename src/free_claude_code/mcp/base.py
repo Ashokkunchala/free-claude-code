@@ -69,6 +69,33 @@ class CallResult:
 
 
 @dataclass(frozen=True)
+class MCPResource:
+    """One resource advertised by an MCP server."""
+
+    uri: str
+    name: str
+    description: str
+    mime_type: str
+
+
+@dataclass(frozen=True)
+class MCPPrompt:
+    """One prompt advertised by an MCP server."""
+
+    name: str
+    description: str
+    arguments: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PromptResult:
+    """Outcome of one prompts/get: redacted text plus any description."""
+
+    text: str
+    description: str
+
+
+@dataclass(frozen=True)
 class ServerProbe:
     """Health report for one configured server. Never raises out of probe."""
 
@@ -179,6 +206,121 @@ class BaseMCPClient:
         self._audit("failed" if is_error else "finished")
         redacted = default_redactor().redact_text("\n".join(parts))
         return CallResult(text=redacted, is_error=is_error)
+
+    def list_resources(self) -> tuple[MCPResource, ...]:
+        """Return the server's advertised resources (validated shape)."""
+
+        result = self._request("resources/list")
+        raw = result.get("resources") if isinstance(result, dict) else None
+        if not isinstance(raw, list):
+            raise MCPError(
+                f"server {self._server.name!r} returned invalid resources/list"
+            )
+        resources: list[MCPResource] = []
+        for entry in raw:
+            if (
+                isinstance(entry, dict)
+                and isinstance(entry.get("uri"), str)
+                and isinstance(entry.get("name"), str)
+            ):
+                description = entry.get("description")
+                mime = entry.get("mimeType")
+                resources.append(
+                    MCPResource(
+                        uri=entry["uri"],
+                        name=entry["name"],
+                        description=description if isinstance(description, str) else "",
+                        mime_type=mime if isinstance(mime, str) else "",
+                    )
+                )
+        return tuple(resources)
+
+    def read_resource(self, uri: str) -> str:
+        """Read one resource; returns redacted joined text content.
+
+        Blob (binary) contents are skipped: they cannot be redacted as
+        text and never reach the audit log.
+        """
+
+        self._audit("planned")
+        result = self._request("resources/read", {"uri": uri})
+        raw = result.get("contents") if isinstance(result, dict) else None
+        if not isinstance(raw, list):
+            raise MCPError(
+                f"server {self._server.name!r} returned invalid resources/read"
+            )
+        parts: list[str] = []
+        for entry in raw:
+            if isinstance(entry, dict):
+                text = entry.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        self._audit("finished")
+        return default_redactor().redact_text("\n".join(parts))
+
+    def list_prompts(self) -> tuple[MCPPrompt, ...]:
+        """Return the server's advertised prompts (validated shape)."""
+
+        result = self._request("prompts/list")
+        raw = result.get("prompts") if isinstance(result, dict) else None
+        if not isinstance(raw, list):
+            raise MCPError(
+                f"server {self._server.name!r} returned invalid prompts/list"
+            )
+        prompts: list[MCPPrompt] = []
+        for entry in raw:
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+                description = entry.get("description")
+                args_raw = entry.get("arguments")
+                arguments: tuple[str, ...] = ()
+                if isinstance(args_raw, list):
+                    arguments = tuple(
+                        arg["name"]
+                        for arg in args_raw
+                        if isinstance(arg, dict) and isinstance(arg.get("name"), str)
+                    )
+                prompts.append(
+                    MCPPrompt(
+                        name=entry["name"],
+                        description=description if isinstance(description, str) else "",
+                        arguments=arguments,
+                    )
+                )
+        return tuple(prompts)
+
+    def get_prompt(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> PromptResult:
+        """Render one advertised prompt; returns redacted joined text."""
+
+        args = arguments or {}
+        if not isinstance(args, dict):
+            raise MCPError("prompt arguments must be a JSON object")
+        prompts = {prompt.name for prompt in self.list_prompts()}
+        if name not in prompts:
+            raise MCPError(
+                f"server {self._server.name!r} has no prompt {name!r} "
+                f"(advertised: {sorted(prompts)})"
+            )
+        self._audit("planned")
+        result = self._request("prompts/get", {"name": name, "arguments": args})
+        raw = result.get("messages") if isinstance(result, dict) else None
+        if not isinstance(raw, list):
+            raise MCPError(f"server {self._server.name!r} returned invalid prompts/get")
+        parts: list[str] = []
+        for message in raw:
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, dict) and content.get("type") == "text":
+                    text = content.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+        description = result.get("description") if isinstance(result, dict) else None
+        self._audit("finished")
+        return PromptResult(
+            text=default_redactor().redact_text("\n".join(parts)),
+            description=description if isinstance(description, str) else "",
+        )
 
     def ping(self) -> None:
         """Liveness check; raises on failure."""

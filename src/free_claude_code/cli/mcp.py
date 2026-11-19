@@ -133,6 +133,27 @@ def main(argv: Sequence[str] | None = None) -> None:
     call_parser.add_argument(
         "--args", default="{}", help="Tool arguments as a JSON object"
     )
+    resources_parser = subparsers.add_parser(
+        "resources", help="List one server's advertised resources (starts it)"
+    )
+    resources_parser.add_argument("name")
+    read_parser = subparsers.add_parser(
+        "read", help="Read one resource from a server (redacted text)"
+    )
+    read_parser.add_argument("name")
+    read_parser.add_argument("uri")
+    prompts_parser = subparsers.add_parser(
+        "prompts", help="List one server's advertised prompts (starts it)"
+    )
+    prompts_parser.add_argument("name")
+    prompt_parser = subparsers.add_parser(
+        "prompt", help="Render one prompt on a server (arguments as a JSON object)"
+    )
+    prompt_parser.add_argument("name")
+    prompt_parser.add_argument("prompt")
+    prompt_parser.add_argument(
+        "--args", default="{}", help="Prompt arguments as a JSON object"
+    )
 
     args = parser.parse_args(argv)
     config_path = (args.config or default_config_path()).resolve()
@@ -227,6 +248,126 @@ def main(argv: Sequence[str] | None = None) -> None:
             elif result.text:
                 print(result.text)
             sys.exit(1 if result.is_error else 0)
+        elif args.command == "resources":
+            verdict = evaluate_server(server, state)
+            if not verdict.allowed:
+                print(verdict.reason, file=sys.stderr)
+                sys.exit(1)
+            client = client_for(server)
+            try:
+                client.start()
+                resources = client.list_resources()
+            except MCPError as exc:
+                print(f"{server.name}: {exc}", file=sys.stderr)
+                sys.exit(1)
+            finally:
+                client.close()
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "resources": [
+                                {
+                                    "uri": resource.uri,
+                                    "name": resource.name,
+                                    "description": resource.description,
+                                    "mime_type": resource.mime_type,
+                                }
+                                for resource in resources
+                            ]
+                        },
+                        indent=2,
+                    )
+                )
+            elif not resources:
+                print(f"{server.name}: no resources")
+            else:
+                for resource in resources:
+                    print(f"{resource.uri}  {resource.name}")
+        elif args.command == "read":
+            verdict = evaluate_server(server, state)
+            if not verdict.allowed:
+                print(verdict.reason, file=sys.stderr)
+                sys.exit(1)
+            client = client_for(server)
+            try:
+                client.start()
+                text = client.read_resource(args.uri)
+            except MCPError as exc:
+                print(f"{server.name}: {exc}", file=sys.stderr)
+                sys.exit(1)
+            finally:
+                client.close()
+            if args.json:
+                print(json.dumps({"uri": args.uri, "text": text}, indent=2))
+            elif text:
+                print(text)
+        elif args.command == "prompts":
+            verdict = evaluate_server(server, state)
+            if not verdict.allowed:
+                print(verdict.reason, file=sys.stderr)
+                sys.exit(1)
+            client = client_for(server)
+            try:
+                client.start()
+                prompts = client.list_prompts()
+            except MCPError as exc:
+                print(f"{server.name}: {exc}", file=sys.stderr)
+                sys.exit(1)
+            finally:
+                client.close()
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "prompts": [
+                                {
+                                    "name": prompt.name,
+                                    "description": prompt.description,
+                                    "arguments": list(prompt.arguments),
+                                }
+                                for prompt in prompts
+                            ]
+                        },
+                        indent=2,
+                    )
+                )
+            elif not prompts:
+                print(f"{server.name}: no prompts")
+            else:
+                for prompt in prompts:
+                    print(prompt.name)
+        elif args.command == "prompt":
+            verdict = evaluate_server(server, state)
+            if not verdict.allowed:
+                print(verdict.reason, file=sys.stderr)
+                sys.exit(1)
+            try:
+                prompt_args = json.loads(args.args)
+            except ValueError:
+                print("--args must be a JSON object", file=sys.stderr)
+                sys.exit(2)
+            if not isinstance(prompt_args, dict):
+                print("--args must be a JSON object", file=sys.stderr)
+                sys.exit(2)
+            client = client_for(server)
+            try:
+                client.start()
+                result = client.get_prompt(args.prompt, prompt_args)
+            except MCPError as exc:
+                print(f"{server.name}: {exc}", file=sys.stderr)
+                sys.exit(1)
+            finally:
+                client.close()
+            if args.json:
+                print(
+                    json.dumps(
+                        {"text": result.text, "description": result.description},
+                        indent=2,
+                    )
+                )
+            elif result.text:
+                print(result.text)
         elif args.command == "tools":
             verdict = evaluate_server(server, state)
             if not verdict.allowed:
