@@ -50,15 +50,20 @@ Rules:
 - Step ids must be unique short strings."""
 
 
-def build_plan_prompt(task: str, *, workspace: str | None = None) -> str:
+def build_plan_prompt(
+    task: str, *, workspace: str | None = None, context: str | None = None
+) -> str:
     """The exact prompt a model should answer with one JSON plan."""
 
     where = f"\nThe workspace root is: {workspace}" if workspace else ""
+    observed = (
+        f"\n\nObserved environment (read-only facts):\n{context}" if context else ""
+    )
     return (
         "You are planning work for a policy-enforced terminal agent. Produce "
         "a plan as ONE JSON object and nothing else (no prose, no Markdown "
         "fences).\n"
-        f"Task: {task}{where}\n\n"
+        f"Task: {task}{where}{observed}\n\n"
         f"The plan must match this shape:\n{_SCHEMA_HELP}\n\n{_RULES}\n"
     )
 
@@ -104,8 +109,14 @@ def plan_from_response(text: str) -> RunPlan:
 
 
 def propose_plan(
-    task: str, model: PlanModelPort, *, workspace: str | None = None
+    task: str,
+    model: PlanModelPort,
+    *,
+    workspace: str | None = None,
+    context: str | None = None,
 ) -> RunPlan:
     """One round-trip: build the prompt, call the port, validate the plan."""
 
-    return plan_from_response(model(build_plan_prompt(task, workspace=workspace)))
+    return plan_from_response(
+        model(build_plan_prompt(task, workspace=workspace, context=context))
+    )

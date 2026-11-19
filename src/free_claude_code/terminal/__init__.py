@@ -16,6 +16,11 @@ from free_claude_code.terminal.audit import (
     JsonlAuditSink,
     NullAuditSink,
 )
+from free_claude_code.terminal.env_context import (
+    EnvContext,
+    collect_env_context,
+    render_env_context,
+)
 from free_claude_code.terminal.errors import (
     PolicyRejectedError,
     SpawnError,
@@ -75,6 +80,7 @@ __all__ = [
     "CommandResult",
     "CommandScheduler",
     "CommandSpec",
+    "EnvContext",
     "FileApprovalStore",
     "InMemoryAuditSink",
     "JsonlAuditSink",
@@ -103,10 +109,12 @@ __all__ = [
     "TerminalExecutorError",
     "VerifySpec",
     "build_plan_prompt",
+    "collect_env_context",
     "command_fingerprint",
     "extract_plan_json",
     "plan_from_response",
     "plan_model_from_env",
     "propose_plan",
     "propose_plan_with_feedback",
+    "render_env_context",
 ]

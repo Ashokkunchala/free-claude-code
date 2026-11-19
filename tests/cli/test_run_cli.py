@@ -145,8 +145,9 @@ def test_task_generates_and_runs_plan(capsys, tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
 
-    def fake_propose(task, model, *, workspace, attempts):
+    def fake_propose(task, model, *, workspace, context, attempts):
         assert task == "say hi"
+        assert context is not None and "Platform:" in context
         return run_cli.RunPlan.from_dict(
             {
                 "goal": "say hi",
@@ -179,7 +180,7 @@ def test_task_rejects_junk_model_response(capsys, tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
 
-    def junk(task, model, *, workspace, attempts):
+    def junk(task, model, *, workspace, context, attempts):
         raise run_cli.PlanError("model response is not valid JSON")
 
     monkeypatch.setattr(run_cli, "propose_plan_with_feedback", junk)
@@ -193,3 +194,27 @@ def test_task_and_plan_file_are_exclusive(capsys, tmp_path, plan_file):
     code = invoke([*base_args(tmp_path, path), "--task", "both"])
     assert code == 1
     assert "not both" in capsys.readouterr().err
+
+
+def test_task_no_context_passes_none(capsys, tmp_path, monkeypatch):
+    import subprocess
+
+    from free_claude_code.cli import run as run_cli
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
+
+    def fake_propose(task, model, *, workspace, context, attempts):
+        assert context is None
+        return run_cli.RunPlan.from_dict(
+            {
+                "goal": "g",
+                "steps": [{"id": "s1", "title": "t", "argv": ["git", "status"]}],
+            }
+        )
+
+    monkeypatch.setattr(run_cli, "propose_plan_with_feedback", fake_propose)
+    code = invoke(
+        ["--task", "g", "--no-context", *base_args(tmp_path, tmp_path / "x")[1:]]
+    )
+    assert code == 0
