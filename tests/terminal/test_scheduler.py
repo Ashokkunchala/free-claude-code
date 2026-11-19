@@ -36,7 +36,9 @@ class StubExecutor:
         self._lock = threading.Lock()
         self.calls: list[tuple[str, ...]] = []
 
-    def run(self, spec, *, policy=None, cancel_event=None, on_output=None, task_id=None):
+    def run(
+        self, spec, *, policy=None, cancel_event=None, on_output=None, task_id=None
+    ):
         with self._lock:
             self.concurrent += 1
             self.max_concurrent = max(self.max_concurrent, self.concurrent)
@@ -149,7 +151,9 @@ def test_shutdown_rejects_new_submissions():
 
 def test_executor_failures_propagate_and_free_slots():
     class Failing:
-        def run(self, spec, *, policy=None, cancel_event=None, on_output=None, task_id=None):
+        def run(
+            self, spec, *, policy=None, cancel_event=None, on_output=None, task_id=None
+        ):
             raise RuntimeError("boom")
 
     scheduler = CommandScheduler(
