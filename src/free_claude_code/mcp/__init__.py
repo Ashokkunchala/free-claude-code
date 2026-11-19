@@ -1,6 +1,7 @@
 """MCP adapters: declarative server configuration, validation and trust."""
 
 from free_claude_code.mcp.client import (
+    CallResult,
     HandshakeError,
     MCPClient,
     MCPError,
@@ -26,6 +27,7 @@ from free_claude_code.mcp.state import MCPState, default_config_path, default_st
 __all__ = [
     "CONFIG_NAME",
     "TRANSPORTS",
+    "CallResult",
     "HandshakeError",
     "MCPClient",
     "MCPError",
