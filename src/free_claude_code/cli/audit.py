@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import Any
 
 from free_claude_code.config.paths import audit_log_path
+from free_claude_code.terminal.redaction import Redactor, default_redactor
 
 _DEFAULT_LIMIT = 50
+_EXPORT_FORMATS = ("json", "jsonl", "text")
 
 
 def read_events(path: Path) -> list[dict[str, Any]]:
@@ -36,6 +38,36 @@ def read_events(path: Path) -> list[dict[str, Any]]:
         if isinstance(event, dict):
             events.append(event)
     return events
+
+
+def _redact_value(value: Any, redactor: Redactor) -> Any:
+    """Redact every string in an audit event, recursively."""
+
+    if isinstance(value, str):
+        return redactor.redact_text(value)
+    if isinstance(value, list):
+        return [_redact_value(item, redactor) for item in value]
+    if isinstance(value, dict):
+        return {key: _redact_value(item, redactor) for key, item in value.items()}
+    return value
+
+
+def export_events(
+    events: list[dict[str, Any]],
+    export_format: str,
+    redactor: Redactor | None = None,
+) -> str:
+    """Render redacted events as a shareable report in the given format."""
+
+    active = redactor if redactor is not None else default_redactor()
+    redacted = [_redact_value(event, active) for event in events]
+    if export_format == "json":
+        return json.dumps(redacted, indent=2) + "\n"
+    if export_format == "jsonl":
+        return "".join(json.dumps(event) + "\n" for event in redacted)
+    if export_format == "text":
+        return "".join(_render(event) + "\n" for event in redacted)
+    raise ValueError(f"unknown export format: {export_format}")
 
 
 def _render(event: dict[str, Any]) -> str:
@@ -79,6 +111,33 @@ def main(argv: Sequence[str] | None = None) -> None:
     show_parser.add_argument("task_id")
     show_parser.add_argument("--json", action="store_true", help="Emit JSON")
 
+    export_parser = subparsers.add_parser(
+        "export", help="Export a redacted, shareable audit report"
+    )
+    export_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Write the report to this file instead of stdout",
+    )
+    export_parser.add_argument(
+        "--format",
+        choices=_EXPORT_FORMATS,
+        default="json",
+        help="Report format (default json)",
+    )
+    export_parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Only export the most recent N events (default all)",
+    )
+    export_parser.add_argument(
+        "--task-id",
+        default=None,
+        help="Only export this task's events",
+    )
+
     args = parser.parse_args(argv)
     path = args.audit_file if args.audit_file is not None else audit_log_path()
     events = read_events(path)
@@ -102,6 +161,20 @@ def main(argv: Sequence[str] | None = None) -> None:
         else:
             for event in selected:
                 print(_render(event))
+    elif args.command == "export":
+        selected = events
+        if args.task_id is not None:
+            selected = [
+                event for event in selected if event.get("task_id") == args.task_id
+            ]
+        if args.limit > 0:
+            selected = selected[-args.limit :]
+        report = export_events(selected, args.format)
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(report, encoding="utf-8")
+        else:
+            print(report, end="")
 
 
-__all__ = ["main", "read_events"]
+__all__ = ["export_events", "main", "read_events"]
