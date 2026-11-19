@@ -134,3 +134,62 @@ def test_from_response_rejects_bad_output(capsys, tmp_path):
     )
     assert code == 2
     assert "invalid model response" in capsys.readouterr().err
+
+
+def test_task_generates_and_runs_plan(capsys, tmp_path, monkeypatch):
+    import subprocess
+
+    from free_claude_code.cli import run as run_cli
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+
+    monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
+
+    def fake_propose(task, model, *, workspace, attempts):
+        assert task == "say hi"
+        return run_cli.RunPlan.from_dict(
+            {
+                "goal": "say hi",
+                "steps": [{"id": "s1", "title": "echo", "argv": ["git", "status"]}],
+            }
+        )
+
+    monkeypatch.setattr(run_cli, "propose_plan_with_feedback", fake_propose)
+    code = invoke(["--task", "say hi", *base_args(tmp_path, tmp_path / "x")[1:]])
+    assert code == 0
+    assert "status: ok" in capsys.readouterr().out
+
+
+def test_task_without_model_config_exits_one(capsys, tmp_path, monkeypatch):
+    from free_claude_code.cli import run as run_cli
+
+    def boom():
+        raise run_cli.PlanModelError(
+            "plan model is not configured; set FCC_PLAN_BASE_URL"
+        )
+
+    monkeypatch.setattr(run_cli, "plan_model_from_env", boom)
+    code = invoke(["--task", "anything", *base_args(tmp_path, tmp_path / "x")[1:]])
+    assert code == 1
+    assert "not configured" in capsys.readouterr().err
+
+
+def test_task_rejects_junk_model_response(capsys, tmp_path, monkeypatch):
+    from free_claude_code.cli import run as run_cli
+
+    monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
+
+    def junk(task, model, *, workspace, attempts):
+        raise run_cli.PlanError("model response is not valid JSON")
+
+    monkeypatch.setattr(run_cli, "propose_plan_with_feedback", junk)
+    code = invoke(["--task", "anything", *base_args(tmp_path, tmp_path / "x")[1:]])
+    assert code == 2
+    assert "did not produce a valid plan" in capsys.readouterr().err
+
+
+def test_task_and_plan_file_are_exclusive(capsys, tmp_path, plan_file):
+    path = plan_file([{"id": "s1", "title": "x", "argv": py("pass")}])
+    code = invoke([*base_args(tmp_path, path), "--task", "both"])
+    assert code == 1
+    assert "not both" in capsys.readouterr().err

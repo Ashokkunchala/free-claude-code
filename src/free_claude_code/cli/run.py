@@ -26,11 +26,14 @@ from free_claude_code.terminal import (
     FileApprovalStore,
     JsonlAuditSink,
     PlanError,
+    PlanModelError,
     RunEngine,
     RunPlan,
     RunReport,
     build_plan_prompt,
     plan_from_response,
+    plan_model_from_env,
+    propose_plan_with_feedback,
 )
 from free_claude_code.terminal.approval import ApprovalTokenIssuer
 from free_claude_code.terminal.policy import PolicyConfig, PolicyEngine
@@ -73,6 +76,18 @@ def main(argv: Sequence[str] | None = None) -> None:
         description="Execute a JSON plan through policy, approvals and audit.",
     )
     parser.add_argument("plan", type=Path, nargs="?", help="Plan JSON file")
+    parser.add_argument(
+        "--task",
+        metavar="TASK",
+        default=None,
+        help="Generate a plan for TASK with the FCC_PLAN_* model and run it",
+    )
+    parser.add_argument(
+        "--model-attempts",
+        type=int,
+        default=2,
+        help="Plan-generation attempts before giving up (default: 2)",
+    )
     parser.add_argument(
         "--print-prompt",
         metavar="TASK",
@@ -165,23 +180,47 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         )
         raise SystemExit(0)
-    if args.plan is None:
-        print("fcc-run: no plan file given", file=sys.stderr)
-        raise SystemExit(EXIT_ERROR)
-
-    try:
-        raw = json.loads(args.plan.read_text(encoding="utf-8"))
-    except OSError as exc:
-        print(f"fcc-run: {exc}", file=sys.stderr)
-        raise SystemExit(EXIT_ERROR) from None
-    except ValueError:
-        print(f"fcc-run: {args.plan}: not valid JSON", file=sys.stderr)
-        raise SystemExit(EXIT_BAD_PLAN) from None
-    try:
-        plan = RunPlan.from_dict(raw)
-    except PlanError as exc:
-        print(f"fcc-run: {args.plan}: {exc}", file=sys.stderr)
-        raise SystemExit(EXIT_BAD_PLAN) from None
+    if args.task is not None:
+        if args.plan is not None:
+            print("fcc-run: pass a plan file or --task, not both", file=sys.stderr)
+            raise SystemExit(EXIT_ERROR)
+        try:
+            model = plan_model_from_env()
+        except PlanModelError as exc:
+            print(f"fcc-run: {exc}", file=sys.stderr)
+            raise SystemExit(EXIT_ERROR) from None
+        try:
+            plan = propose_plan_with_feedback(
+                args.task,
+                model,
+                workspace=str(workspace),
+                attempts=args.model_attempts,
+            )
+        except PlanModelError as exc:
+            print(f"fcc-run: {exc}", file=sys.stderr)
+            raise SystemExit(EXIT_ERROR) from None
+        except PlanError as exc:
+            print(
+                f"fcc-run: model did not produce a valid plan: {exc}", file=sys.stderr
+            )
+            raise SystemExit(EXIT_BAD_PLAN) from None
+    else:
+        if args.plan is None:
+            print("fcc-run: no plan file given", file=sys.stderr)
+            raise SystemExit(EXIT_ERROR)
+        try:
+            raw = json.loads(args.plan.read_text(encoding="utf-8"))
+        except OSError as exc:
+            print(f"fcc-run: {exc}", file=sys.stderr)
+            raise SystemExit(EXIT_ERROR) from None
+        except ValueError:
+            print(f"fcc-run: {args.plan}: not valid JSON", file=sys.stderr)
+            raise SystemExit(EXIT_BAD_PLAN) from None
+        try:
+            plan = RunPlan.from_dict(raw)
+        except PlanError as exc:
+            print(f"fcc-run: {args.plan}: {exc}", file=sys.stderr)
+            raise SystemExit(EXIT_BAD_PLAN) from None
 
     if args.dry_run:
         engine = PolicyEngine(PolicyConfig(workspace_root=str(workspace)))
