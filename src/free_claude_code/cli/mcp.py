@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from free_claude_code.mcp import (
-    MCPClient,
     MCPError,
     MCPServer,
     MCPState,
+    client_for,
     evaluate_server,
     probe_server,
 )
@@ -209,7 +209,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             if not isinstance(call_args, dict):
                 print("--args must be a JSON object", file=sys.stderr)
                 sys.exit(2)
-            client = MCPClient(server)
+            client = client_for(server)
             try:
                 client.start()
                 result = client.call_tool(args.tool, call_args)
@@ -232,7 +232,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             if not verdict.allowed:
                 print(verdict.reason, file=sys.stderr)
                 sys.exit(1)
-            client = MCPClient(server)
+            client = client_for(server)
             try:
                 client.start()
                 tools = client.list_tools()
