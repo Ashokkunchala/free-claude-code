@@ -89,3 +89,48 @@ def test_approval_resume_flow(capsys, tmp_path, plan_file):
     assert report_out == 3  # still pending
     data = json.loads(capsys.readouterr().out)
     assert data["status"] == "approval_required"
+
+
+def test_print_prompt(capsys, tmp_path):
+    code = invoke(["--workspace", str(tmp_path), "--print-prompt", "run tests"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "run tests" in out and '"argv"' in out
+
+
+def test_from_response_validates(capsys, tmp_path):
+    response = tmp_path / "response.txt"
+    response.write_text(
+        '{"goal": "g", "steps": [{"id": "a", "argv": ["git", "status"]}]}',
+        encoding="utf-8",
+    )
+    code = invoke(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--from-response",
+            "check repo",
+            "--response",
+            str(response),
+        ]
+    )
+    assert code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["steps"][0]["argv"] == ["git", "status"]
+
+
+def test_from_response_rejects_bad_output(capsys, tmp_path):
+    response = tmp_path / "response.txt"
+    response.write_text("sorry, cannot help", encoding="utf-8")
+    code = invoke(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--from-response",
+            "x",
+            "--response",
+            str(response),
+        ]
+    )
+    assert code == 2
+    assert "invalid model response" in capsys.readouterr().err
