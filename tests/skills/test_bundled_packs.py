@@ -34,10 +34,14 @@ def test_bundled_pack_names_are_unique() -> None:
 def test_bundled_packs_cover_the_roadmap_families() -> None:
     names = {pack.name for pack in discover_packs(bundled_packs_dir())}
     assert {
+        "api-runner",
         "aws-inventory",
+        "bug-repro",
         "ci-triage",
         "docker-triage",
         "k8s-inspect",
         "log-correlation",
+        "repo-recon",
+        "sql-inspect",
         "terraform-drift",
     } <= names

@@ -1,0 +1,23 @@
+name = "repo-recon"
+version = "0.1.0"
+purpose = "Repository reconnaissance and architecture mapping: layout, entry points, dependencies, ownership and change hotspots"
+platforms = ["linux", "macos", "windows"]
+required_tools = ["git"]
+max_risk = "r0"
+approval_from = "r2"
+timeout_seconds = 600
+rollback = "Reconnaissance is read-only; no rollback applies"
+verification = ["Map cites real paths verified on disk", "Every dependency claim names the manifest it came from"]
+executable = false
+
+[[tools]]
+name = "map-layout"
+description = "Summarize directory structure, entry points, test layout and build configuration of a repository"
+timeout_seconds = 180
+max_output_bytes = 262144
+
+[[tools]]
+name = "change-hotspots"
+description = "Rank files by recent churn from git history to find where bugs and reviews concentrate"
+timeout_seconds = 180
+max_output_bytes = 262144

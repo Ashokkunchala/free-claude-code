@@ -1,0 +1,23 @@
+name = "api-runner"
+version = "0.1.0"
+purpose = "API integration workflows: pagination, retries, rate limits and idempotent request design"
+platforms = ["linux", "macos", "windows"]
+required_tools = []
+max_risk = "r1"
+approval_from = "r2"
+timeout_seconds = 900
+rollback = "Read-only requests need no rollback; mutating calls require idempotency keys or a documented undo"
+verification = ["Request method, URL and status code recorded per call", "Retries and rate-limit handling demonstrated on at least one response"]
+executable = false
+
+[[tools]]
+name = "probe-endpoint"
+description = "Issue one request and capture status, headers, latency and a bounded body excerpt"
+timeout_seconds = 120
+max_output_bytes = 262144
+
+[[tools]]
+name = "paginate"
+description = "Walk a paginated endpoint with a page cap and rate-limit-aware delays, collecting a bounded result set"
+timeout_seconds = 600
+max_output_bytes = 524288
