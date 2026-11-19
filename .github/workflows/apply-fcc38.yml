@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: feat/t6-scheduler
           fetch-depth: 0
       - name: apply patch and push
         run: |
