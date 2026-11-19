@@ -31,6 +31,15 @@ from free_claude_code.terminal.policy import (
 )
 from free_claude_code.terminal.redaction import Redactor
 from free_claude_code.terminal.result import CommandResult, OutputChunk
+from free_claude_code.terminal.run import (
+    PlanError,
+    RunEngine,
+    RunPlan,
+    RunReport,
+    RunStep,
+    StepReport,
+    VerifySpec,
+)
 from free_claude_code.terminal.scheduler import (
     CommandScheduler,
     QueueFullError,
@@ -58,6 +67,7 @@ __all__ = [
     "JsonlAuditSink",
     "NullAuditSink",
     "OutputChunk",
+    "PlanError",
     "PolicyConfig",
     "PolicyDecision",
     "PolicyEngine",
@@ -67,10 +77,16 @@ __all__ = [
     "Redactor",
     "Requirement",
     "RiskLevel",
+    "RunEngine",
+    "RunPlan",
+    "RunReport",
+    "RunStep",
     "SchedulerConfig",
     "SchedulerStats",
     "SpawnError",
+    "StepReport",
     "TerminalExecutor",
     "TerminalExecutorError",
+    "VerifySpec",
     "command_fingerprint",
 ]

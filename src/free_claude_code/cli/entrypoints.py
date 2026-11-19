@@ -69,6 +69,13 @@ def audit(argv: Sequence[str] | None = None) -> None:
     main(argv)
 
 
+def run_plan(argv: Sequence[str] | None = None) -> None:
+    """Execute a JSON plan through the run engine (registered as ``fcc-run``)."""
+    from free_claude_code.cli.run import main
+
+    main(argv)
+
+
 def exec_command(argv: Sequence[str] | None = None) -> None:
     """Run one command through policy enforcement (registered as ``fcc-exec``)."""
     from free_claude_code.cli.runner import main

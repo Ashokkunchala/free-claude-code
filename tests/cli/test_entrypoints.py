@@ -47,6 +47,7 @@ def test_cli_scripts_are_registered() -> None:
         "fcc-approvals": "free_claude_code.cli.entrypoints:approvals",
         "fcc-audit": "free_claude_code.cli.entrypoints:audit",
         "fcc-exec": "free_claude_code.cli.entrypoints:exec_command",
+        "fcc-run": "free_claude_code.cli.entrypoints:run_plan",
         "fcc-inspect": "free_claude_code.cli.entrypoints:inspect",
         "fcc-ops": "free_claude_code.cli.entrypoints:ops",
         "fcc-skills": "free_claude_code.cli.entrypoints:skills",
