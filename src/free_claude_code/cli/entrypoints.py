@@ -88,3 +88,10 @@ def ops(argv: Sequence[str] | None = None) -> None:
     from free_claude_code.cli.ops import main
 
     main(argv)
+
+
+def skills(argv: Sequence[str] | None = None) -> None:
+    """Manage declarative skill packs (registered as ``fcc-skills``)."""
+    from free_claude_code.cli.skills import main
+
+    main(argv)
