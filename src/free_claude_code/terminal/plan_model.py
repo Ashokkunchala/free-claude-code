@@ -13,8 +13,12 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 
-from free_claude_code.terminal.plan_gen import propose_plan
-from free_claude_code.terminal.run import PlanError, RunPlan
+from free_claude_code.terminal.plan_gen import (
+    build_repair_prompt,
+    plan_from_response,
+    propose_plan,
+)
+from free_claude_code.terminal.run import PlanError, RunPlan, RunReport
 
 #: Raw chat-completions POST: (url, payload, headers, timeout) -> decoded body.
 ChatTransport = Callable[[str, dict, dict[str, str], float], dict]
@@ -149,6 +153,34 @@ def propose_plan_with_feedback(
             return propose_plan(
                 prompt_task, model, workspace=workspace, context=context
             )
+        except PlanError as exc:
+            last_error = exc
+    assert last_error is not None
+    raise last_error
+
+
+def propose_repair(
+    task: str,
+    report: RunReport,
+    model: Callable[[str], str],
+    *,
+    workspace: str | None = None,
+    context: str | None = None,
+    attempts: int = 2,
+) -> RunPlan:
+    """Ask the model for a residual plan after a failed run, with feedback."""
+
+    last_error: PlanError | None = None
+    prompt = build_repair_prompt(task, report, workspace=workspace, context=context)
+    for _ in range(max(1, attempts)):
+        candidate = prompt
+        if last_error is not None:
+            candidate = (
+                f"{prompt}\n\nYour previous response was rejected: {last_error}. "
+                "Answer with ONE JSON plan object and nothing else."
+            )
+        try:
+            return plan_from_response(model(candidate))
         except PlanError as exc:
             last_error = exc
     assert last_error is not None

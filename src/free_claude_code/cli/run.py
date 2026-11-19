@@ -35,6 +35,7 @@ from free_claude_code.terminal import (
     plan_from_response,
     plan_model_from_env,
     propose_plan_with_feedback,
+    propose_repair,
     render_env_context,
 )
 from free_claude_code.terminal.approval import ApprovalTokenIssuer
@@ -94,6 +95,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         type=int,
         default=2,
         help="Plan-generation attempts before giving up (default: 2)",
+    )
+    parser.add_argument(
+        "--repair-attempts",
+        type=int,
+        default=0,
+        help="With --task: model-driven repair rounds after a failed run (default: 0)",
     )
     parser.add_argument(
         "--print-prompt",
@@ -276,6 +283,34 @@ def main(argv: Sequence[str] | None = None) -> None:
         workspace=str(workspace), store=store, issuer=issuer, sink=sink
     )
     report = engine_runner.run(plan, task_id=task_id)
+    repairs_left = args.repair_attempts
+    while report.status in ("failed", "verify_failed") and repairs_left > 0:
+        if args.task is None:
+            break
+        repairs_left -= 1
+        print(
+            f"run {report.status}; asking the model for a repair plan "
+            f"({repairs_left} left)",
+            file=sys.stderr,
+        )
+        try:
+            plan = propose_repair(
+                args.task,
+                report,
+                model,
+                workspace=str(workspace),
+                context=context,
+                attempts=args.model_attempts,
+            )
+        except PlanModelError as exc:
+            print(f"fcc-run: {exc}", file=sys.stderr)
+            raise SystemExit(EXIT_ERROR) from None
+        except PlanError as exc:
+            print(
+                f"fcc-run: model did not produce a valid repair: {exc}", file=sys.stderr
+            )
+            raise SystemExit(EXIT_BAD_PLAN) from None
+        report = engine_runner.run(plan, task_id=task_id)
     _print_report(report, as_json=args.json)
     if report.status == "approval_required":
         print(

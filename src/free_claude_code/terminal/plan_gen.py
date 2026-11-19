@@ -12,7 +12,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from free_claude_code.terminal.run import PlanError, RunPlan
+from free_claude_code.terminal.run import PlanError, RunPlan, RunReport
 
 #: A model adapter: prompt in, raw text out.
 PlanModelPort = Callable[[str], str]
@@ -120,3 +120,56 @@ def propose_plan(
     return plan_from_response(
         model(build_plan_prompt(task, workspace=workspace, context=context))
     )
+
+
+_REPAIR_RULES = """Rules:
+- The replacement plan must cover ONLY the remaining work: the failed
+  step's goal and every residual step. Do not repeat completed steps.
+- Prefer a different approach for the failed step unless the failure was
+  clearly environmental (missing tool, wrong cwd, transient error).
+- The same argv-vector, verification and risk rules as before apply.
+"""
+
+
+def build_repair_prompt(
+    task: str,
+    report: RunReport,
+    *,
+    workspace: str | None = None,
+    context: str | None = None,
+) -> str:
+    """Prompt asking the model to repair a failed run with a residual plan."""
+
+    done = [s for s in report.steps if s.status == "ok"]
+    failed = [s for s in report.steps if s.status != "ok"]
+    lines = [
+        "A policy-enforced terminal agent ran a plan and it stopped before "
+        "completing the goal.",
+        f"Original task: {task}",
+        f"Run status: {report.status}",
+    ]
+    if workspace:
+        lines.append(f"The workspace root is: {workspace}")
+    if done:
+        lines.append("Completed steps (do not repeat):")
+        lines.extend(f"  - {s.step_id}: {s.title}" for s in done)
+    for s in failed:
+        detail = f"  - {s.step_id}: {s.title} [status {s.status}]"
+        if s.reason:
+            detail += f" - {s.reason}"
+        if s.exit_code is not None:
+            detail += f" (exit {s.exit_code})"
+        if s.verify_exit_code not in (None, 0):
+            detail += f" (verify exit {s.verify_exit_code})"
+        lines.append("Failed step:" if s is failed[0] else "")
+        lines.append(detail)
+    if report.residual:
+        lines.append(f"Steps never run: {', '.join(report.residual)}")
+    if context:
+        lines.append(f"Observed environment (read-only facts):\n{context}")
+    lines.append(
+        "\nProduce the replacement plan as ONE JSON object in the same shape "
+        "as before and nothing else."
+    )
+    lines.append(_REPAIR_RULES)
+    return "\n".join(line for line in lines if line != "")
