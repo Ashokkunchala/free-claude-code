@@ -24,6 +24,7 @@ class ToolKind(enum.StrEnum):
     AWS = "aws"
     AZ = "az"
     GCLOUD = "gcloud"
+    JOURNALCTL = "journalctl"
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,7 @@ DEVOPS_TOOLS: tuple[ToolProbe, ...] = (
     ToolProbe(ToolKind.AWS, ("aws", "--version")),
     ToolProbe(ToolKind.AZ, ("az", "version")),
     ToolProbe(ToolKind.GCLOUD, ("gcloud", "--version")),
+    ToolProbe(ToolKind.JOURNALCTL, ("journalctl", "--version")),
 )
 
 assert DEFAULT_TIMEOUT_SECONDS >= _PROBE_TIMEOUT_SECONDS
