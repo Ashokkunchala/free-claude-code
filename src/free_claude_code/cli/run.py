@@ -21,6 +21,7 @@ from free_claude_code.config.paths import (
     approval_secret_path,
     approvals_path,
     audit_log_path,
+    runs_dir_path,
 )
 from free_claude_code.terminal import (
     FileApprovalStore,
@@ -30,13 +31,16 @@ from free_claude_code.terminal import (
     RunEngine,
     RunPlan,
     RunReport,
+    append_run_record,
     build_plan_prompt,
     collect_env_context,
+    load_run_history,
     plan_from_response,
     plan_model_from_env,
     propose_plan_with_feedback,
     propose_repair,
     render_env_context,
+    render_run_summary,
 )
 from free_claude_code.terminal.approval import ApprovalTokenIssuer
 from free_claude_code.terminal.policy import PolicyConfig, PolicyEngine
@@ -140,8 +144,32 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--approvals-file", type=Path, default=None)
     parser.add_argument("--secret-file", type=Path, default=None)
     parser.add_argument("--audit-file", type=Path, default=None)
+    parser.add_argument(
+        "--runs-dir",
+        type=Path,
+        default=None,
+        help="Directory for persisted run reports (default: config runs dir)",
+    )
+    parser.add_argument(
+        "--history",
+        metavar="TASK_ID",
+        default=None,
+        help="Print the recorded run history for a task id and exit",
+    )
 
     args = parser.parse_args(argv)
+
+    if args.history is not None:
+        runs_dir = args.runs_dir if args.runs_dir is not None else runs_dir_path()
+        history = load_run_history(runs_dir, args.history)
+        if history is None:
+            print(f"fcc-run: no recorded run for task {args.history}", file=sys.stderr)
+            raise SystemExit(EXIT_ERROR)
+        if args.json:
+            print(json.dumps(history, indent=2, sort_keys=True))
+        else:
+            print(render_run_summary(history))
+        raise SystemExit(0)
     workspace = args.workspace.resolve()
 
     if args.print_prompt is not None:
@@ -282,7 +310,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     engine_runner = RunEngine(
         workspace=str(workspace), store=store, issuer=issuer, sink=sink
     )
+    runs_dir = args.runs_dir if args.runs_dir is not None else runs_dir_path()
     report = engine_runner.run(plan, task_id=task_id)
+    record_path = append_run_record(runs_dir, report)
     repairs_left = args.repair_attempts
     while report.status in ("failed", "verify_failed") and repairs_left > 0:
         if args.task is None:
@@ -311,7 +341,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
             raise SystemExit(EXIT_BAD_PLAN) from None
         report = engine_runner.run(plan, task_id=task_id)
+        record_path = append_run_record(runs_dir, report)
     _print_report(report, as_json=args.json)
+    print(f"run recorded: {record_path}", file=sys.stderr)
     if report.status == "approval_required":
         print(
             f"approval required; re-run with --task-id {task_id} after approving",

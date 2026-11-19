@@ -25,6 +25,7 @@ PROFILES_FILENAME = "profiles.json"
 APPROVALS_FILENAME = "approvals.json"
 APPROVAL_SECRET_FILENAME = "approval-secret"
 AUDIT_LOG_FILENAME = "audit.jsonl"
+RUNS_DIRNAME = "runs"
 
 
 def config_dir_path() -> Path:
@@ -116,6 +117,12 @@ def audit_log_path() -> Path:
     """Return the terminal command audit log path."""
 
     return config_dir_path() / FCC_LOGS_DIRNAME / AUDIT_LOG_FILENAME
+
+
+def runs_dir_path() -> Path:
+    """Return the directory holding persisted per-task run reports."""
+
+    return config_dir_path() / RUNS_DIRNAME
 
 
 def codex_model_catalog_path() -> Path:

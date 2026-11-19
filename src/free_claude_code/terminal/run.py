@@ -157,6 +157,7 @@ class StepReport:
     step_id: str
     title: str
     status: str
+    argv: tuple[str, ...] = ()
     reason: str = ""
     risk_level: str = ""
     exit_code: int | None = None
@@ -168,6 +169,7 @@ class StepReport:
             "id": self.step_id,
             "title": self.title,
             "status": self.status,
+            "argv": list(self.argv),
             "reason": self.reason,
             "risk_level": self.risk_level,
             "exit_code": self.exit_code,
@@ -301,7 +303,13 @@ class RunEngine:
                 spec = self._spec_for(step)
             except ValueError as exc:
                 reports.append(
-                    StepReport(step.step_id, step.title, STATUS_FAILED, reason=str(exc))
+                    StepReport(
+                        step.step_id,
+                        step.title,
+                        STATUS_FAILED,
+                        argv=step.argv,
+                        reason=str(exc),
+                    )
                 )
                 status = STATUS_FAILED
                 return RunReport(plan.goal, task_id, status, tuple(reports), residual)
@@ -320,6 +328,7 @@ class RunEngine:
                         step.step_id,
                         step.title,
                         STATUS_DENIED,
+                        argv=step.argv,
                         reason=verdict.reason,
                         risk_level=verdict.level.name,
                     )
@@ -344,6 +353,7 @@ class RunEngine:
                             step.step_id,
                             step.title,
                             STATUS_DENIED,
+                            argv=step.argv,
                             reason="approval denied",
                             risk_level=verdict.level.name,
                         )
@@ -358,6 +368,7 @@ class RunEngine:
                             step.step_id,
                             step.title,
                             STATUS_APPROVAL_REQUIRED,
+                            argv=step.argv,
                             reason=verdict.reason,
                             risk_level=verdict.level.name,
                         )
@@ -391,6 +402,7 @@ class RunEngine:
                         step.step_id,
                         step.title,
                         STATUS_FAILED,
+                        argv=step.argv,
                         reason=f"execution error: {exc}",
                         risk_level=verdict.level.name,
                     )
@@ -406,6 +418,7 @@ class RunEngine:
                         step.step_id,
                         step.title,
                         STATUS_FAILED,
+                        argv=step.argv,
                         reason=reason,
                         exit_code=result.exit_code,
                         duration_seconds=duration,
@@ -423,6 +436,7 @@ class RunEngine:
                             step.step_id,
                             step.title,
                             STATUS_VERIFY_FAILED,
+                            argv=step.argv,
                             reason=(
                                 "verification did not pass"
                                 if not check.cancelled
@@ -446,6 +460,7 @@ class RunEngine:
                         step.step_id,
                         step.title,
                         STATUS_OK,
+                        argv=step.argv,
                         exit_code=result.exit_code,
                         duration_seconds=duration,
                         verify_exit_code=check.exit_code,
@@ -458,6 +473,7 @@ class RunEngine:
                     step.step_id,
                     step.title,
                     STATUS_OK,
+                    argv=step.argv,
                     exit_code=result.exit_code,
                     duration_seconds=duration,
                     risk_level=verdict.level.name,

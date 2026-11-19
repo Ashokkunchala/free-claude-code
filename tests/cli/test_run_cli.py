@@ -37,6 +37,8 @@ def base_args(tmp_path, plan_path):
         str(tmp_path / "secret"),
         "--audit-file",
         str(tmp_path / "audit.jsonl"),
+        "--runs-dir",
+        str(tmp_path / "runs"),
     ]
 
 
@@ -274,3 +276,101 @@ def test_task_without_repair_attempts_stays_failed(capsys, tmp_path, monkeypatch
     code = invoke(["--task", "g", *base_args(tmp_path, tmp_path / "x")[1:]])
     assert code == 1
     assert "status: failed" in capsys.readouterr().out
+
+
+def test_run_records_history_with_commands(tmp_path):
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    plan = tmp_path / "plan.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "goal": "demo",
+                "steps": [{"id": "s1", "title": "ok", "argv": ["git", "status"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    code = invoke(base_args(tmp_path, plan))
+    assert code == 0
+    records = list((tmp_path / "runs").glob("*.json"))
+    assert len(records) == 1
+    history = json.loads(records[0].read_text(encoding="utf-8"))
+    assert history["goal"] == "demo"
+    assert len(history["attempts"]) == 1
+    assert history["attempts"][0]["steps"][0]["argv"] == ["git", "status"]
+    assert history["attempts"][0]["steps"][0]["exit_code"] == 0
+
+
+def test_repair_loop_records_each_attempt(tmp_path, monkeypatch):
+    import subprocess
+
+    from free_claude_code.cli import run as run_cli
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+
+    monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
+
+    def fake_propose(task, model, *, workspace, context, attempts):
+        return run_cli.RunPlan.from_dict(
+            {"goal": "g", "steps": [{"id": "s1", "title": "bad", "argv": ["false"]}]}
+        )
+
+    def fake_repair(task, report, model, *, workspace, context, attempts):
+        return run_cli.RunPlan.from_dict(
+            {
+                "goal": "g",
+                "steps": [{"id": "r1", "title": "ok", "argv": ["git", "status"]}],
+            }
+        )
+
+    monkeypatch.setattr(run_cli, "propose_plan_with_feedback", fake_propose)
+    monkeypatch.setattr(run_cli, "propose_repair", fake_repair)
+    code = invoke(
+        [
+            "--task",
+            "g",
+            "--repair-attempts",
+            "1",
+            "--task-id",
+            "repair-history-task",
+            *base_args(tmp_path, tmp_path / "x")[1:],
+        ]
+    )
+    assert code == 0
+    history = json.loads(
+        (tmp_path / "runs" / "repair-history-task.json").read_text(encoding="utf-8")
+    )
+    assert len(history["attempts"]) == 2
+    assert history["attempts"][0]["status"] == "failed"
+    assert history["attempts"][1]["status"] == "ok"
+
+
+def test_history_prints_recorded_run(capsys, tmp_path):
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    plan = tmp_path / "plan.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "goal": "demo",
+                "steps": [{"id": "s1", "title": "ok", "argv": ["git", "status"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = base_args(tmp_path, plan)
+    assert invoke([*args, "--task-id", "hist-task"]) == 0
+    capsys.readouterr()
+    code = invoke(["--history", "hist-task", "--runs-dir", str(tmp_path / "runs")])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "hist-task" in out
+    assert "git status" in out
+
+
+def test_history_unknown_task_fails(capsys, tmp_path):
+    code = invoke(["--history", "nope", "--runs-dir", str(tmp_path / "runs")])
+    assert code == 1
