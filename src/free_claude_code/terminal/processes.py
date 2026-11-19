@@ -12,6 +12,7 @@ import contextlib
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Mapping, Sequence
@@ -33,6 +34,8 @@ def spawn(
     inherit_stdio: bool = False,
     isolated: bool = True,
     track: bool = True,
+    max_cpu_seconds: float | None = None,
+    max_memory_bytes: int | None = None,
 ) -> subprocess.Popen[bytes]:
     """Start a child process.
 
@@ -42,7 +45,9 @@ def spawn(
     ``inherit_stdio`` leaves stdin/stdout/stderr attached to the caller's
     terminal instead of piping them for capture. ``track`` adds the child to
     the executor's orphan-sweep table; callers managing their own lifecycle
-    (launchers, detached servers) opt out.
+    (launchers, detached servers) opt out. ``max_cpu_seconds`` /
+    ``max_memory_bytes`` cap the child's CPU time and address space via POSIX
+    rlimits; both are a no-op on Windows.
     """
 
     kwargs: dict[str, Any] = {}
@@ -60,11 +65,38 @@ def spawn(
             )
         else:
             kwargs["start_new_session"] = True
+    preexec = _make_limit_preexec(max_cpu_seconds, max_memory_bytes)
+    if preexec is not None:
+        kwargs["preexec_fn"] = preexec
     process = cast("subprocess.Popen[bytes]", subprocess.Popen(argv, **kwargs))
     if track and process.pid:
         with _lock:
             _tracked[process.pid] = process
     return process
+
+
+def _make_limit_preexec(
+    max_cpu_seconds: float | None,
+    max_memory_bytes: int | None,
+) -> Any:
+    """Build a POSIX preexec_fn applying rlimits; None when no limits/Windows."""
+
+    if os.name == "nt" or (max_cpu_seconds is None and max_memory_bytes is None):
+        return None
+    import resource
+
+    def apply_limits() -> None:
+        if max_cpu_seconds is not None:
+            secs = max(1, int(max_cpu_seconds + 0.999999))
+            resource.setrlimit(resource.RLIMIT_CPU, (secs, secs))
+        # RLIMIT_AS is unreliable on macOS: dyld's shared cache maps far more
+        # virtual memory than any sensible budget, so a limit either fails to
+        # set or makes the child unlaunchable. Enforce it on Linux only.
+        if max_memory_bytes is not None and sys.platform != "darwin":
+            limit = int(max_memory_bytes)
+            resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
+    return apply_limits
 
 
 def spawn_detached(
