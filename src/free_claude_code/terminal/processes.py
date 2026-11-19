@@ -12,6 +12,7 @@ import contextlib
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Mapping, Sequence
@@ -88,7 +89,10 @@ def _make_limit_preexec(
         if max_cpu_seconds is not None:
             secs = max(1, int(max_cpu_seconds + 0.999999))
             resource.setrlimit(resource.RLIMIT_CPU, (secs, secs))
-        if max_memory_bytes is not None:
+        # RLIMIT_AS is unreliable on macOS: dyld's shared cache maps far more
+        # virtual memory than any sensible budget, so a limit either fails to
+        # set or makes the child unlaunchable. Enforce it on Linux only.
+        if max_memory_bytes is not None and sys.platform != "darwin":
             limit = int(max_memory_bytes)
             resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
 

@@ -58,7 +58,9 @@ def test_cpu_budget_kills_busy_loop() -> None:
     assert kinds[-1] == "failed"
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="rlimits are POSIX-only")
+@pytest.mark.skipif(
+    sys.platform != "linux", reason="memory budget uses RLIMIT_AS, Linux-only"
+)
 def test_memory_budget_fails_large_allocation() -> None:
     sink = InMemoryAuditSink()
     result = TerminalExecutor(sink=sink).run(

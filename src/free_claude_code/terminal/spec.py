@@ -22,8 +22,9 @@ class CommandSpec:
     fields and streaming callbacks never fire. ``isolated=False`` keeps the
     child in the caller's process group so terminal signals reach it directly.
     ``max_cpu_seconds`` and ``max_memory_bytes`` cap the child's CPU time and
-    address space; both are enforced with POSIX rlimits in the child and are a
-    documented no-op on Windows.
+    address space; both are enforced with POSIX rlimits in the child, are a
+    documented no-op on Windows, and the memory budget is enforced on Linux
+    only (RLIMIT_AS is unreliable under macOS's dyld shared cache).
     """
 
     argv: tuple[str, ...]
