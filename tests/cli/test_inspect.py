@@ -114,3 +114,80 @@ def test_status_json_in_repo(workspace: Path, capsys) -> None:
     assert payload["git"]["repository"] is True
     assert payload["git"]["branch"] == "main"
     assert payload["git"]["dirty"] is True
+
+
+def test_env_plain(workspace: Path, capsys) -> None:
+    run(["--workspace", str(workspace), "env"])
+    out = capsys.readouterr().out
+    assert "Platform:" in out
+
+
+def test_env_json(workspace: Path, capsys) -> None:
+    run(["--workspace", str(workspace), "--json", "env"])
+    data = json.loads(capsys.readouterr().out)
+    assert data["os"]
+    assert data["python"]
+    assert isinstance(data["top_level"], list)
+
+
+def test_runs_empty(tmp_path: Path, capsys) -> None:
+    run(["runs", "--runs-dir", str(tmp_path / "runs")])
+    assert "no recorded runs" in capsys.readouterr().out
+
+
+def _record(runs_dir: Path, task_id: str, status: str) -> None:
+    from free_claude_code.terminal import append_run_record
+    from free_claude_code.terminal.run import RunReport, StepReport
+
+    append_run_record(
+        runs_dir,
+        RunReport(
+            goal="demo goal",
+            task_id=task_id,
+            status=status,
+            steps=(
+                StepReport(
+                    step_id="s1",
+                    title="step",
+                    status="ok",
+                    argv=("git", "status"),
+                    exit_code=0,
+                ),
+            ),
+            residual=(),
+        ),
+    )
+
+
+def test_runs_list(tmp_path: Path, capsys) -> None:
+    runs_dir = tmp_path / "runs"
+    _record(runs_dir, "task-a", "ok")
+    _record(runs_dir, "task-a", "ok")
+    _record(runs_dir, "task-b", "failed")
+    run(["runs", "--runs-dir", str(runs_dir)])
+    out = capsys.readouterr().out
+    assert "task-a: ok (2 attempt(s)) - demo goal" in out
+    assert "task-b: failed (1 attempt(s))" in out
+
+
+def test_runs_one_task(tmp_path: Path, capsys) -> None:
+    runs_dir = tmp_path / "runs"
+    _record(runs_dir, "task-a", "ok")
+    run(["runs", "task-a", "--runs-dir", str(runs_dir)])
+    out = capsys.readouterr().out
+    assert "demo goal" in out
+    assert "git status" in out
+
+
+def test_runs_one_task_json(tmp_path: Path, capsys) -> None:
+    runs_dir = tmp_path / "runs"
+    _record(runs_dir, "task-a", "ok")
+    run(["--json", "runs", "task-a", "--runs-dir", str(runs_dir)])
+    data = json.loads(capsys.readouterr().out)
+    assert data["attempts"][0]["steps"][0]["argv"] == ["git", "status"]
+
+
+def test_runs_unknown_task(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as exc:
+        run(["runs", "nope", "--runs-dir", str(tmp_path / "runs")])
+    assert exc.value.code == 1
