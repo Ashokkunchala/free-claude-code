@@ -28,6 +28,12 @@ from free_claude_code.terminal.plan_gen import (
     plan_from_response,
     propose_plan,
 )
+from free_claude_code.terminal.plan_model import (
+    ChatCompletionsModel,
+    PlanModelError,
+    plan_model_from_env,
+    propose_plan_with_feedback,
+)
 from free_claude_code.terminal.policy import (
     PolicyConfig,
     PolicyEngine,
@@ -65,6 +71,7 @@ __all__ = [
     "ApprovalTokenIssuer",
     "AuditEvent",
     "AuditSink",
+    "ChatCompletionsModel",
     "CommandResult",
     "CommandScheduler",
     "CommandSpec",
@@ -74,6 +81,7 @@ __all__ = [
     "NullAuditSink",
     "OutputChunk",
     "PlanError",
+    "PlanModelError",
     "PolicyConfig",
     "PolicyDecision",
     "PolicyEngine",
@@ -98,5 +106,7 @@ __all__ = [
     "command_fingerprint",
     "extract_plan_json",
     "plan_from_response",
+    "plan_model_from_env",
     "propose_plan",
+    "propose_plan_with_feedback",
 ]
