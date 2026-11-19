@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from free_claude_code.config.paths import runs_dir_path
 from free_claude_code.repo import (
     RepoFileError,
     read_file,
@@ -18,6 +19,12 @@ from free_claude_code.repo import (
     search_files,
 )
 from free_claude_code.repo.git import GitError, GitRepo
+from free_claude_code.terminal import (
+    collect_env_context,
+    load_run_history,
+    render_env_context,
+    render_run_summary,
+)
 
 _DEFAULT_GREP_LIMIT = 100
 
@@ -57,6 +64,22 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     subparsers.add_parser("status", help="Git state and workspace summary")
 
+    subparsers.add_parser("env", help="Platform, shell, git and workspace listing")
+
+    runs_parser = subparsers.add_parser("runs", help="Recorded run reports")
+    runs_parser.add_argument(
+        "task_id",
+        nargs="?",
+        default=None,
+        help="Show one task's full history (default: list all recorded tasks)",
+    )
+    runs_parser.add_argument(
+        "--runs-dir",
+        type=Path,
+        default=None,
+        help="Run report directory (default: config runs dir)",
+    )
+
     read_parser = subparsers.add_parser("read", help="Read one file")
     read_parser.add_argument("path")
     read_parser.add_argument(
@@ -81,6 +104,71 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     root = args.workspace.resolve()
+
+    if args.command == "env":
+        context = collect_env_context(str(root))
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "os": context.os_name,
+                        "arch": context.arch,
+                        "python": context.python_version,
+                        "shell": context.shell,
+                        "git_branch": context.git_branch,
+                        "git_dirty": list(context.git_dirty),
+                        "top_level": list(context.top_level),
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(render_env_context(context))
+        return
+
+    if args.command == "runs":
+        runs_dir = args.runs_dir if args.runs_dir is not None else runs_dir_path()
+        if args.task_id is not None:
+            history = load_run_history(runs_dir, args.task_id)
+            if history is None:
+                print(
+                    f"fcc-inspect: no recorded run for task {args.task_id}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
+            if args.json:
+                print(json.dumps(history, indent=2, sort_keys=True))
+            else:
+                print(render_run_summary(history))
+            return
+        records = []
+        if runs_dir.is_dir():
+            for path in sorted(runs_dir.glob("*.json")):
+                history = load_run_history(runs_dir, path.stem)
+                if history is None:
+                    continue
+                attempts = history["attempts"]
+                records.append(
+                    {
+                        "task_id": history.get("task_id", path.stem),
+                        "goal": history.get("goal", ""),
+                        "attempts": len(attempts),
+                        "last_status": attempts[-1].get("status", "?")
+                        if attempts
+                        else "?",
+                    }
+                )
+        if args.json:
+            print(json.dumps(records, indent=2))
+        else:
+            if not records:
+                print("no recorded runs")
+            for record in records:
+                print(
+                    f"{record['task_id']}: {record['last_status']} "
+                    f"({record['attempts']} attempt(s)) - {record['goal']}"
+                )
+        return
 
     try:
         if args.command == "status":
