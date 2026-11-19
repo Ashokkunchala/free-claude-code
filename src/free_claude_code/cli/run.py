@@ -29,6 +29,8 @@ from free_claude_code.terminal import (
     RunEngine,
     RunPlan,
     RunReport,
+    build_plan_prompt,
+    plan_from_response,
 )
 from free_claude_code.terminal.approval import ApprovalTokenIssuer
 from free_claude_code.terminal.policy import PolicyConfig, PolicyEngine
@@ -70,7 +72,25 @@ def main(argv: Sequence[str] | None = None) -> None:
         prog="fcc-run",
         description="Execute a JSON plan through policy, approvals and audit.",
     )
-    parser.add_argument("plan", type=Path, help="Plan JSON file")
+    parser.add_argument("plan", type=Path, nargs="?", help="Plan JSON file")
+    parser.add_argument(
+        "--print-prompt",
+        metavar="TASK",
+        default=None,
+        help="Print the plan-generation prompt for TASK and exit",
+    )
+    parser.add_argument(
+        "--from-response",
+        metavar="TASK",
+        default=None,
+        help="Validate a model response (--response FILE) into plan JSON",
+    )
+    parser.add_argument(
+        "--response",
+        type=Path,
+        default=None,
+        help="File with the model's raw response (with --from-response)",
+    )
     parser.add_argument(
         "--workspace",
         type=Path,
@@ -94,6 +114,60 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     workspace = args.workspace.resolve()
+
+    if args.print_prompt is not None:
+        print(build_plan_prompt(args.print_prompt, workspace=str(workspace)))
+        raise SystemExit(0)
+    if args.from_response is not None:
+        if args.response is None:
+            print("fcc-run: --from-response needs --response FILE", file=sys.stderr)
+            raise SystemExit(EXIT_ERROR)
+        try:
+            raw_response = args.response.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"fcc-run: {exc}", file=sys.stderr)
+            raise SystemExit(EXIT_ERROR) from None
+        try:
+            proposed = plan_from_response(raw_response)
+        except PlanError as exc:
+            print(f"fcc-run: invalid model response: {exc}", file=sys.stderr)
+            raise SystemExit(EXIT_BAD_PLAN) from None
+        print(
+            json.dumps(
+                {
+                    "goal": proposed.goal,
+                    "steps": [
+                        {
+                            "id": step.step_id,
+                            "title": step.title,
+                            "argv": list(step.argv),
+                            **({"cwd": step.cwd} if step.cwd is not None else {}),
+                            **(
+                                {"timeout_seconds": step.timeout_seconds}
+                                if step.timeout_seconds is not None
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "verify": {
+                                        "argv": list(step.verify.argv),
+                                        "expect_exit": step.verify.expect_exit,
+                                    }
+                                }
+                                if step.verify is not None
+                                else {}
+                            ),
+                        }
+                        for step in proposed.steps
+                    ],
+                },
+                indent=2,
+            )
+        )
+        raise SystemExit(0)
+    if args.plan is None:
+        print("fcc-run: no plan file given", file=sys.stderr)
+        raise SystemExit(EXIT_ERROR)
 
     try:
         raw = json.loads(args.plan.read_text(encoding="utf-8"))

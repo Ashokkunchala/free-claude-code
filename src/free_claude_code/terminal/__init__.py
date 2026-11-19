@@ -22,6 +22,12 @@ from free_claude_code.terminal.errors import (
     TerminalExecutorError,
 )
 from free_claude_code.terminal.executor import TerminalExecutor
+from free_claude_code.terminal.plan_gen import (
+    build_plan_prompt,
+    extract_plan_json,
+    plan_from_response,
+    propose_plan,
+)
 from free_claude_code.terminal.policy import (
     PolicyConfig,
     PolicyEngine,
@@ -88,5 +94,9 @@ __all__ = [
     "TerminalExecutor",
     "TerminalExecutorError",
     "VerifySpec",
+    "build_plan_prompt",
     "command_fingerprint",
+    "extract_plan_json",
+    "plan_from_response",
+    "propose_plan",
 ]
