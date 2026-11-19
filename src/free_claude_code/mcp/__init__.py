@@ -14,6 +14,13 @@ from free_claude_code.mcp.base import (
     ServerProbe,
     ServerStartError,
 )
+from free_claude_code.mcp.bridge import (
+    BridgedTool,
+    MCPBridge,
+    anthropic_tool_schema,
+    exposed_tool_name,
+    openai_tool_schema,
+)
 from free_claude_code.mcp.client import MCPClient
 from free_claude_code.mcp.config import (
     CONFIG_NAME,
@@ -31,9 +38,11 @@ from free_claude_code.mcp.state import MCPState, default_config_path, default_st
 __all__ = [
     "CONFIG_NAME",
     "TRANSPORTS",
+    "BridgedTool",
     "CallResult",
     "HTTPMCPClient",
     "HandshakeError",
+    "MCPBridge",
     "MCPClient",
     "MCPError",
     "MCPPrompt",
@@ -48,11 +57,14 @@ __all__ = [
     "ServerProbe",
     "ServerStartError",
     "ServerVerdict",
+    "anthropic_tool_schema",
     "client_for",
     "default_config_path",
     "default_state_path",
     "evaluate_server",
+    "exposed_tool_name",
     "load_config",
+    "openai_tool_schema",
     "parse_config",
     "parse_server",
     "probe_server",
