@@ -17,6 +17,7 @@ from free_claude_code.ops import (
     DriftStatus,
     aws_diagnostics,
     azure_diagnostics,
+    build_runbook,
     compose_diagnostics,
     docker_diagnostics,
     gcloud_diagnostics,
@@ -26,6 +27,7 @@ from free_claude_code.ops import (
     parse_pods,
     plan_probe,
     review_drift,
+    runbook_names,
     state_list_probe,
     synthesize_timeline,
     terraform_diagnostics,
@@ -146,6 +148,52 @@ def _incident(
         print(synthesize_timeline(warnings))
 
 
+def _runbook(
+    runner: DiagnosticsRunner,
+    name: str | None,
+    *,
+    workload: str | None,
+    namespace: str | None,
+    unit: str | None,
+    as_json: bool,
+) -> None:
+    if name is None:
+        if as_json:
+            print(json.dumps({"runbooks": list(runbook_names())}, indent=2))
+        else:
+            for known in runbook_names():
+                print(known)
+        return
+    params: dict[str, Any] = {}
+    if workload is not None:
+        params["workload"] = workload
+    if namespace is not None:
+        params["namespace"] = namespace
+    if unit is not None:
+        params["unit"] = unit
+    try:
+        book = build_runbook(name, **params)
+    except KeyError as error:
+        print(error.args[0], file=sys.stderr)
+        sys.exit(2)
+    except TypeError as error:
+        print(f"runbook {name}: bad arguments: {error}", file=sys.stderr)
+        sys.exit(2)
+    if as_json:
+        results = []
+        for step in book.steps:
+            report = runner.run_plan(f"{book.name}:{step.label}", step.probes)
+            results.append({"step": step.label, "report": _report_json(report)})
+        print(json.dumps({"runbook": book.name, "steps": results}, indent=2))
+        return
+    print(f"== runbook: {book.name} - {book.summary} ==")
+    for step in book.steps:
+        print(f"-- {step.label}")
+        _print_report(
+            runner.run_plan(f"{book.name}:{step.label}", step.probes), as_json=False
+        )
+
+
 def _drift(runner: DiagnosticsRunner, tool: str, *, as_json: bool) -> None:
     report = runner.run_plan(
         "terraform-drift", (plan_probe(tool=tool), state_list_probe(tool=tool))
@@ -221,6 +269,16 @@ def main(argv: Sequence[str] | None = None) -> None:
         "--tool", choices=("terraform", "tofu"), default="terraform"
     )
 
+    runbook_parser = subparsers.add_parser(
+        "runbook", help="Run an incident runbook (read-only evidence steps)"
+    )
+    runbook_parser.add_argument(
+        "name", nargs="?", help="Runbook name (omit to list the built-ins)"
+    )
+    runbook_parser.add_argument("--workload", default=None, help="Workload/pod name")
+    runbook_parser.add_argument("-n", "--namespace", default=None)
+    runbook_parser.add_argument("--unit", default=None, help="systemd unit name")
+
     args = parser.parse_args(argv)
     runner = DiagnosticsRunner(args.workspace.resolve())
 
@@ -243,6 +301,15 @@ def main(argv: Sequence[str] | None = None) -> None:
             _incident(runner, args.workload, args.namespace, pods, as_json=args.json)
         elif args.command == "drift":
             _drift(runner, args.tool, as_json=args.json)
+        elif args.command == "runbook":
+            _runbook(
+                runner,
+                args.name,
+                workload=args.workload,
+                namespace=args.namespace,
+                unit=args.unit,
+                as_json=args.json,
+            )
         else:
             _print_report(
                 runner.run_plan(args.command, _PLANS[args.command]()),

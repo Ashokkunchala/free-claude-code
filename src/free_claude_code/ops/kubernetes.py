@@ -80,13 +80,25 @@ def describe_pod(pod: str, namespace: str | None = None) -> Probe:
     return Probe("k8s-describe-pod", argv)
 
 
-def pod_logs(pod: str, namespace: str | None = None, *, tail: int = 50) -> Probe:
-    """A bounded tail of one pod's logs (read-only)."""
+def pod_logs(
+    pod: str,
+    namespace: str | None = None,
+    *,
+    tail: int = 50,
+    previous: bool = False,
+) -> Probe:
+    """A bounded tail of one pod's logs (read-only).
+
+    ``previous`` reads the last terminated container's logs - the
+    evidence that matters for a crash-looping pod.
+    """
 
     argv = ("kubectl", "logs", pod, f"--tail={tail}")
+    if previous:
+        argv = (*argv, "--previous")
     if namespace:
         argv = (*argv, "-n", namespace)
-    return Probe("k8s-pod-logs", argv)
+    return Probe("k8s-pod-logs" + ("-previous" if previous else ""), argv)
 
 
 def parse_pods(payload: dict[str, Any]) -> tuple[PodSummary, ...]:
