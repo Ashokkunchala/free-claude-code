@@ -16,7 +16,8 @@ from free_claude_code.terminal.approval import ApprovalTokenIssuer
 from free_claude_code.terminal.policy import PolicyConfig, PolicyEngine
 from tests.terminal.conftest import py
 
-PY_NAME = Path(sys.executable).name
+# Policy basenames lowercase and strip ".exe"; match that normalization.
+PY_NAME = Path(sys.executable).name.lower().removesuffix(".exe")
 
 
 def plan(steps):
