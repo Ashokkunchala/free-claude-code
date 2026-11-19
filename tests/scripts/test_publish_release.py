@@ -308,3 +308,25 @@ def test_no_release_does_not_wait_for_an_unfinished_release(releases):
     before = remote.builds
     remote.publisher().publish(docs)
     assert remote.builds == before
+
+
+@pytest.fixture
+def no_tags(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    git(tmp_path, "init", "-b", "main")
+    write(tmp_path, "src/file.py", "base")
+    base = commit(tmp_path)
+    git(tmp_path, "update-ref", "refs/remotes/origin/main", base)
+    state = FakeRemote(tmp_path)
+    state.releases = {}
+    monkeypatch.setattr(publishing, "command", state.command)
+    return tmp_path, state
+
+
+def test_first_release_waits_for_a_baseline_tag(no_tags, capsys):
+    _, remote = no_tags
+    head = remote.advance("minor: Add feature")
+    remote.publisher().publish(head)
+    assert "No release tags found" in capsys.readouterr().out
+    assert not any(c[:2] == ["git", "tag"] for c in remote.calls)
+    assert not any(c[:2] == ["git", "push"] for c in remote.calls)
