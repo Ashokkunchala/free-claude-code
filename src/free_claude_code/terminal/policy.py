@@ -293,6 +293,24 @@ _READ_VERBS = frozenset(
     }
 )
 
+_VERSION_FLAGS = frozenset({"--version", "-v", "version", "--help", "-h", "help"})
+
+_KUBECTL_CONFIG_READS = frozenset({"current-context", "get-contexts", "view"})
+
+_COMPOSE_READS = frozenset(
+    {
+        "config",
+        "events",
+        "images",
+        "logs",
+        "ls",
+        "ps",
+        "stats",
+        "top",
+        "version",
+    }
+)
+
 _GIT_READ = frozenset(
     {
         "blame",
@@ -427,18 +445,38 @@ def _classify_git(args: tuple[str, ...]) -> tuple[RiskLevel, str]:
 def _classify_verb_command(name: str, args: tuple[str, ...]) -> tuple[RiskLevel, str]:
     verbs = [arg for arg in args if not arg.startswith("-")]
     joined = " ".join(verbs)
+    if not verbs and args and all(arg in _VERSION_FLAGS for arg in args):
+        return RiskLevel.R0_READ_ONLY, f"{name}:version"
     if name in ("terraform", "tofu"):
         if verbs and verbs[0] == "destroy":
             return RiskLevel.R3_DESTRUCTIVE, f"{name}:destroy"
         if verbs and verbs[0] == "apply":
             return RiskLevel.R2_PRIVILEGED, f"{name}:apply"
+        if verbs and verbs[0] == "version":
+            return RiskLevel.R0_READ_ONLY, f"{name}:version"
         if verbs and verbs[0] in ("plan", "validate", "show", "output"):
             return RiskLevel.R1_REVERSIBLE, f"{name}:read"
+        if verbs[:1] == ["state"]:
+            # `state pull` prints the raw state, secrets included.
+            if len(verbs) >= 2 and verbs[1] == "list":
+                return RiskLevel.R1_REVERSIBLE, f"{name}:state-read"
+            return RiskLevel.R2_PRIVILEGED, f"{name}:state-write"
         return RiskLevel.R2_PRIVILEGED, f"{name}:other"
     if name in ("kubectl", "helm"):
         destructive = {"delete", "drain", "uninstall"}
         if verbs and verbs[0] in destructive:
             return RiskLevel.R3_DESTRUCTIVE, f"{name}:{verbs[0]}"
+        if name == "kubectl" and verbs[:1] == ["config"]:
+            # `config view --raw` prints credentials; keep it privileged.
+            if len(verbs) >= 2 and verbs[1] in _KUBECTL_CONFIG_READS:
+                if "--raw" in args:
+                    return RiskLevel.R2_PRIVILEGED, "kubectl:config-raw"
+                return RiskLevel.R0_READ_ONLY, "kubectl:config-read"
+            return RiskLevel.R2_PRIVILEGED, "kubectl:config-write"
+        if name == "kubectl" and verbs[:1] == ["rollout"]:
+            if len(verbs) >= 2 and verbs[1] in ("status", "history"):
+                return RiskLevel.R0_READ_ONLY, "kubectl:rollout-read"
+            return RiskLevel.R2_PRIVILEGED, "kubectl:rollout-write"
         if verbs and verbs[0] in _READ_VERBS:
             return RiskLevel.R0_READ_ONLY, f"{name}:read"
         return RiskLevel.R2_PRIVILEGED, f"{name}:write"
@@ -448,6 +486,10 @@ def _classify_verb_command(name: str, args: tuple[str, ...]) -> tuple[RiskLevel,
             return RiskLevel.R3_DESTRUCTIVE, f"{name}:prune"
         if verbs and (verbs[0] in ("rm", "rmi") or "rm" in verbs):
             return RiskLevel.R3_DESTRUCTIVE, f"{name}:remove"
+        if verbs[:1] == ["compose"]:
+            if len(verbs) >= 2 and verbs[1] in _COMPOSE_READS:
+                return RiskLevel.R0_READ_ONLY, f"{name}:compose-read"
+            return RiskLevel.R2_PRIVILEGED, f"{name}:compose-write"
         if verbs and verbs[0] in _READ_VERBS:
             return RiskLevel.R0_READ_ONLY, f"{name}:read"
         return RiskLevel.R2_PRIVILEGED, f"{name}:write"

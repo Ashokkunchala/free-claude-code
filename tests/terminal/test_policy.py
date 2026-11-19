@@ -245,3 +245,98 @@ def test_executor_runs_allowed_and_rejects_denied(
     denied = PolicyEngine().evaluate(spec("sudo", "ls")).to_decision()
     with pytest.raises(PolicyRejectedError):
         executor.run(CommandSpec(argv=echo_stdout), policy=denied)
+
+
+def test_devops_version_probes_are_r0() -> None:
+    for argv in (
+        ("docker", "--version"),
+        ("kubectl", "version", "--client"),
+        ("helm", "version", "--short"),
+        ("aws", "--version"),
+        ("az", "version"),
+        ("gcloud", "--version"),
+    ):
+        level, _ = classify(argv)
+        assert level is RiskLevel.R0_READ_ONLY, argv
+
+
+def test_terraform_version_is_read_only() -> None:
+    for argv in (("terraform", "version"), ("tofu", "version")):
+        level, _ = classify(argv)
+        assert level in (RiskLevel.R0_READ_ONLY, RiskLevel.R1_REVERSIBLE), argv
+
+
+def test_kubectl_config_read_verbs_are_r0() -> None:
+    for argv in (
+        ("kubectl", "config", "current-context"),
+        ("kubectl", "config", "get-contexts"),
+        ("kubectl", "config", "view"),
+        ("kubectl", "config", "view", "--minify"),
+    ):
+        level, _ = classify(argv)
+        assert level is RiskLevel.R0_READ_ONLY, argv
+
+
+def test_kubectl_config_raw_and_writes_stay_privileged() -> None:
+    for argv in (
+        ("kubectl", "config", "view", "--raw"),
+        ("kubectl", "config", "use-context", "prod"),
+        ("kubectl", "config", "set-context", "dev"),
+    ):
+        level, _ = classify(argv)
+        assert level is RiskLevel.R2_PRIVILEGED, argv
+
+
+def test_kubectl_rollout_read_verbs_are_r0() -> None:
+    for argv in (
+        ("kubectl", "rollout", "status", "deployment/web"),
+        ("kubectl", "rollout", "history", "deployment/web"),
+    ):
+        level, _ = classify(argv)
+        assert level is RiskLevel.R0_READ_ONLY, argv
+
+
+def test_kubectl_rollout_mutations_stay_privileged() -> None:
+    for argv in (
+        ("kubectl", "rollout", "restart", "deployment/web"),
+        ("kubectl", "rollout", "undo", "deployment/web"),
+        ("kubectl", "rollout", "pause", "deployment/web"),
+    ):
+        level, _ = classify(argv)
+        assert level is RiskLevel.R2_PRIVILEGED, argv
+
+
+def test_docker_compose_read_verbs_are_r0() -> None:
+    for argv in (
+        ("docker", "compose", "ps", "-a"),
+        ("docker", "compose", "logs", "web"),
+        ("docker", "compose", "config"),
+        ("docker", "compose", "images"),
+        ("docker", "compose", "ls"),
+    ):
+        level, _ = classify(argv)
+        assert level is RiskLevel.R0_READ_ONLY, argv
+
+
+def test_docker_compose_mutations_stay_privileged() -> None:
+    for argv in (
+        ("docker", "compose", "up", "-d"),
+        ("docker", "compose", "down"),
+        ("docker", "compose", "build"),
+        ("docker", "compose", "restart"),
+    ):
+        level, _ = classify(argv)
+        assert level is RiskLevel.R2_PRIVILEGED, argv
+
+
+def test_terraform_state_list_is_low_risk_but_mutations_stay_gated() -> None:
+    level, _ = classify(("terraform", "state", "list"))
+    assert level is RiskLevel.R1_REVERSIBLE
+    for argv in (
+        ("terraform", "state", "pull"),
+        ("terraform", "state", "mv", "a", "b"),
+        ("terraform", "state", "rm", "x"),
+        ("tofu", "state", "push"),
+    ):
+        level, _ = classify(argv)
+        assert level is RiskLevel.R2_PRIVILEGED, argv
