@@ -109,3 +109,10 @@ def mcp(argv: Sequence[str] | None = None) -> None:
     from free_claude_code.cli.mcp import main
 
     main(argv)
+
+
+def config(argv: Sequence[str] | None = None) -> None:
+    """Show, validate and explain effective configuration (``fcc-config``)."""
+    from free_claude_code.cli.config import main
+
+    main(argv)
