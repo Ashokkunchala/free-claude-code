@@ -1,0 +1,67 @@
+name: apply-fcc55
+on:
+  push:
+    branches: [chore/apply-fcc55]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/run-task
+          fetch-depth: 0
+      - name: Decode patch
+        run: |
+          cat <<'B64EOF' | base64 -d > /tmp/series.patch
+          RnJvbSBkY2QyMjg0MDc3Zjc5NjcyMTY3ODdmM2Y3ZDNhNTIxY2NhYWQxMzY1IE1vbiBTZXAgMTcg
+          MDA6MDA6MDAgMjAwMQpGcm9tOiBJbnN0aW5jdCBBZ2VudCA8YWdlbnRAaW5zdGluY3QuY29tPgpE
+          YXRlOiBUaHUsIDE5IE5vdiAyMDI2IDIwOjAwOjA1ICswNTMwClN1YmplY3Q6IFtQQVRDSF0gc3R5
+          bGUoY2xpKTogdW5wYWNrIGJhc2VfYXJncyBpbiBmY2MtcnVuIC0tdGFzayB0ZXN0cyAoUlVGMDA1
+          KQoKLS0tCiB0ZXN0cy9jbGkvdGVzdF9ydW5fY2xpLnB5IHwgOCArKysrLS0tLQogMSBmaWxlIGNo
+          YW5nZWQsIDQgaW5zZXJ0aW9ucygrKSwgNCBkZWxldGlvbnMoLSkKCmRpZmYgLS1naXQgYS90ZXN0
+          cy9jbGkvdGVzdF9ydW5fY2xpLnB5IGIvdGVzdHMvY2xpL3Rlc3RfcnVuX2NsaS5weQppbmRleCAx
+          MzI0NWU2Li5mYzE2MGUxIDEwMDY0NAotLS0gYS90ZXN0cy9jbGkvdGVzdF9ydW5fY2xpLnB5Cisr
+          KyBiL3Rlc3RzL2NsaS90ZXN0X3J1bl9jbGkucHkKQEAgLTE1NSw3ICsxNTUsNyBAQCBkZWYgdGVz
+          dF90YXNrX2dlbmVyYXRlc19hbmRfcnVuc19wbGFuKGNhcHN5cywgdG1wX3BhdGgsIG1vbmtleXBh
+          dGNoKToKICAgICAgICAgKQogCiAgICAgbW9ua2V5cGF0Y2guc2V0YXR0cihydW5fY2xpLCAicHJv
+          cG9zZV9wbGFuX3dpdGhfZmVlZGJhY2siLCBmYWtlX3Byb3Bvc2UpCi0gICAgY29kZSA9IGludm9r
+          ZShbIi0tdGFzayIsICJzYXkgaGkiXSArIGJhc2VfYXJncyh0bXBfcGF0aCwgdG1wX3BhdGggLyAi
+          eCIpWzE6XSkKKyAgICBjb2RlID0gaW52b2tlKFsiLS10YXNrIiwgInNheSBoaSIsICpiYXNlX2Fy
+          Z3ModG1wX3BhdGgsIHRtcF9wYXRoIC8gIngiKVsxOl1dKQogICAgIGFzc2VydCBjb2RlID09IDAK
+          ICAgICBhc3NlcnQgInN0YXR1czogb2siIGluIGNhcHN5cy5yZWFkb3V0ZXJyKCkub3V0CiAKQEAg
+          LTE2OSw3ICsxNjksNyBAQCBkZWYgdGVzdF90YXNrX3dpdGhvdXRfbW9kZWxfY29uZmlnX2V4aXRz
+          X29uZShjYXBzeXMsIHRtcF9wYXRoLCBtb25rZXlwYXRjaCk6CiAgICAgICAgICkKIAogICAgIG1v
+          bmtleXBhdGNoLnNldGF0dHIocnVuX2NsaSwgInBsYW5fbW9kZWxfZnJvbV9lbnYiLCBib29tKQot
+          ICAgIGNvZGUgPSBpbnZva2UoWyItLXRhc2siLCAiYW55dGhpbmciXSArIGJhc2VfYXJncyh0bXBf
+          cGF0aCwgdG1wX3BhdGggLyAieCIpWzE6XSkKKyAgICBjb2RlID0gaW52b2tlKFsiLS10YXNrIiwg
+          ImFueXRoaW5nIiwgKmJhc2VfYXJncyh0bXBfcGF0aCwgdG1wX3BhdGggLyAieCIpWzE6XV0pCiAg
+          ICAgYXNzZXJ0IGNvZGUgPT0gMQogICAgIGFzc2VydCAibm90IGNvbmZpZ3VyZWQiIGluIGNhcHN5
+          cy5yZWFkb3V0ZXJyKCkuZXJyCiAKQEAgLTE4MywxMyArMTgzLDEzIEBAIGRlZiB0ZXN0X3Rhc2tf
+          cmVqZWN0c19qdW5rX21vZGVsX3Jlc3BvbnNlKGNhcHN5cywgdG1wX3BhdGgsIG1vbmtleXBhdGNo
+          KToKICAgICAgICAgcmFpc2UgcnVuX2NsaS5QbGFuRXJyb3IoIm1vZGVsIHJlc3BvbnNlIGlzIG5v
+          dCB2YWxpZCBKU09OIikKIAogICAgIG1vbmtleXBhdGNoLnNldGF0dHIocnVuX2NsaSwgInByb3Bv
+          c2VfcGxhbl93aXRoX2ZlZWRiYWNrIiwganVuaykKLSAgICBjb2RlID0gaW52b2tlKFsiLS10YXNr
+          IiwgImFueXRoaW5nIl0gKyBiYXNlX2FyZ3ModG1wX3BhdGgsIHRtcF9wYXRoIC8gIngiKVsxOl0p
+          CisgICAgY29kZSA9IGludm9rZShbIi0tdGFzayIsICJhbnl0aGluZyIsICpiYXNlX2FyZ3ModG1w
+          X3BhdGgsIHRtcF9wYXRoIC8gIngiKVsxOl1dKQogICAgIGFzc2VydCBjb2RlID09IDIKICAgICBh
+          c3NlcnQgImRpZCBub3QgcHJvZHVjZSBhIHZhbGlkIHBsYW4iIGluIGNhcHN5cy5yZWFkb3V0ZXJy
+          KCkuZXJyCiAKIAogZGVmIHRlc3RfdGFza19hbmRfcGxhbl9maWxlX2FyZV9leGNsdXNpdmUoY2Fw
+          c3lzLCB0bXBfcGF0aCwgcGxhbl9maWxlKToKICAgICBwYXRoID0gcGxhbl9maWxlKFt7ImlkIjog
+          InMxIiwgInRpdGxlIjogIngiLCAiYXJndiI6IHB5KCJwYXNzIil9XSkKLSAgICBjb2RlID0gaW52
+          b2tlKGJhc2VfYXJncyh0bXBfcGF0aCwgcGF0aCkgKyBbIi0tdGFzayIsICJib3RoIl0pCisgICAg
+          Y29kZSA9IGludm9rZShbKmJhc2VfYXJncyh0bXBfcGF0aCwgcGF0aCksICItLXRhc2siLCAiYm90
+          aCJdKQogICAgIGFzc2VydCBjb2RlID09IDEKICAgICBhc3NlcnQgIm5vdCBib3RoIiBpbiBjYXBz
+          eXMucmVhZG91dGVycigpLmVycgotLSAKMi4zNC4xCgo=
+          B64EOF
+      - name: Apply series
+        run: |
+          git config user.name "fcc-apply-bot"
+          git config user.email "fcc-apply-bot@users.noreply.github.com"
+          git config core.autocrlf false
+          git am --keep-cr --whitespace=nowarn /tmp/series.patch
+      - name: Push branch
+        run: |
+          git fetch origin feat/run-task || true
+          git push --force-with-lease origin HEAD:feat/run-task
