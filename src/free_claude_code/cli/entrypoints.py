@@ -81,3 +81,10 @@ def inspect(argv: Sequence[str] | None = None) -> None:
     from free_claude_code.cli.inspect import main
 
     main(argv)
+
+
+def ops(argv: Sequence[str] | None = None) -> None:
+    """Read-only DevOps diagnostics and incident evidence (``fcc-ops``)."""
+    from free_claude_code.cli.ops import main
+
+    main(argv)
