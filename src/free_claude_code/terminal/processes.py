@@ -36,6 +36,7 @@ def spawn(
     track: bool = True,
     max_cpu_seconds: float | None = None,
     max_memory_bytes: int | None = None,
+    pipe_stdin: bool = False,
 ) -> subprocess.Popen[bytes]:
     """Start a child process.
 
@@ -58,6 +59,8 @@ def spawn(
     if not inherit_stdio:
         kwargs["stdout"] = subprocess.PIPE
         kwargs["stderr"] = subprocess.PIPE
+    if pipe_stdin:
+        kwargs["stdin"] = subprocess.PIPE
     if isolated:
         if os.name == "nt":
             kwargs["creationflags"] = (
