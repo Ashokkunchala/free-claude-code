@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from free_claude_code.mcp import (
+    MCPBridge,
     MCPError,
     MCPServer,
     MCPState,
@@ -86,6 +87,51 @@ def _inspect(server: MCPServer, state: MCPState, *, as_json: bool) -> None:
     print(f"output limit: {server.max_output_bytes} bytes")
 
 
+def _bridge_command(
+    args: argparse.Namespace, servers: list[MCPServer], state: MCPState
+) -> None:
+    """``export-tools``/``invoke``: the bridge over every enabled server."""
+
+    bridge = MCPBridge(servers, state)
+    try:
+        bridge.collect()
+        if args.command == "export-tools":
+            tools = (
+                bridge.anthropic_tools()
+                if args.format == "anthropic"
+                else bridge.openai_tools()
+            )
+            print(
+                json.dumps(
+                    {
+                        "format": args.format,
+                        "tools": tools,
+                        "errors": bridge.collection_errors,
+                    },
+                    indent=2,
+                )
+            )
+            return
+        try:
+            call_args = json.loads(args.args)
+        except ValueError:
+            print("--args must be a JSON object", file=sys.stderr)
+            sys.exit(2)
+        if not isinstance(call_args, dict):
+            print("--args must be a JSON object", file=sys.stderr)
+            sys.exit(2)
+        try:
+            result = bridge.dispatch(args.exposed, call_args)
+        except MCPError as exc:
+            print(str(exc), file=sys.stderr)
+            sys.exit(1)
+        if result.text:
+            print(result.text)
+        sys.exit(1 if result.is_error else 0)
+    finally:
+        bridge.close()
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     """CLI for managing configured MCP servers."""
 
@@ -154,6 +200,23 @@ def main(argv: Sequence[str] | None = None) -> None:
     prompt_parser.add_argument(
         "--args", default="{}", help="Prompt arguments as a JSON object"
     )
+    export_parser = subparsers.add_parser(
+        "export-tools",
+        help="Export enabled servers' tools as provider tool definitions (JSON)",
+    )
+    export_parser.add_argument(
+        "--format",
+        choices=("anthropic", "openai"),
+        default="anthropic",
+        help="Provider schema dialect (default: anthropic)",
+    )
+    invoke_parser = subparsers.add_parser(
+        "invoke", help="Invoke one tool by its exposed <server>__<tool> name"
+    )
+    invoke_parser.add_argument("exposed")
+    invoke_parser.add_argument(
+        "--args", default="{}", help="Tool arguments as a JSON object"
+    )
 
     args = parser.parse_args(argv)
     config_path = (args.config or default_config_path()).resolve()
@@ -188,6 +251,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         servers = list(load_config(config_path))
         if args.command == "list":
             _print_servers(servers, state, as_json=args.json)
+            return
+        if args.command in ("export-tools", "invoke"):
+            _bridge_command(args, servers, state)
             return
         server = _find(servers, args.name)
         if server is None:
