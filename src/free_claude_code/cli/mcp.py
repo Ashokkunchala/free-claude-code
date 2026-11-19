@@ -125,6 +125,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         "tools", help="List one server's advertised tools (starts it)"
     )
     tools_parser.add_argument("name")
+    call_parser = subparsers.add_parser(
+        "call", help="Invoke one tool on a server (arguments as a JSON object)"
+    )
+    call_parser.add_argument("name")
+    call_parser.add_argument("tool")
+    call_parser.add_argument(
+        "--args", default="{}", help="Tool arguments as a JSON object"
+    )
 
     args = parser.parse_args(argv)
     config_path = (args.config or default_config_path()).resolve()
@@ -188,6 +196,37 @@ def main(argv: Sequence[str] | None = None) -> None:
                 if report.tools:
                     print(f"  tools: {', '.join(report.tools)}")
             sys.exit(0 if report.ok else 1)
+        elif args.command == "call":
+            verdict = evaluate_server(server, state)
+            if not verdict.allowed:
+                print(verdict.reason, file=sys.stderr)
+                sys.exit(1)
+            try:
+                call_args = json.loads(args.args)
+            except ValueError:
+                print("--args must be a JSON object", file=sys.stderr)
+                sys.exit(2)
+            if not isinstance(call_args, dict):
+                print("--args must be a JSON object", file=sys.stderr)
+                sys.exit(2)
+            client = MCPClient(server)
+            try:
+                client.start()
+                result = client.call_tool(args.tool, call_args)
+            except MCPError as exc:
+                print(f"{server.name}: {exc}", file=sys.stderr)
+                sys.exit(1)
+            finally:
+                client.close()
+            if args.json:
+                print(
+                    json.dumps(
+                        {"text": result.text, "is_error": result.is_error}, indent=2
+                    )
+                )
+            elif result.text:
+                print(result.text)
+            sys.exit(1 if result.is_error else 0)
         elif args.command == "tools":
             verdict = evaluate_server(server, state)
             if not verdict.allowed:

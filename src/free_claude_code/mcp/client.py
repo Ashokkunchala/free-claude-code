@@ -20,14 +20,17 @@ import subprocess
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+
+import jsonschema
 
 from free_claude_code.mcp.config import MCPServer
 from free_claude_code.mcp.permissions import evaluate_server
 from free_claude_code.mcp.state import MCPState
 from free_claude_code.terminal import processes
 from free_claude_code.terminal.audit import AuditSink, NullAuditSink, make_event
+from free_claude_code.terminal.redaction import default_redactor
 
 PROTOCOL_VERSION = "2025-03-26"
 CLIENT_NAME = "free-claude-code"
@@ -59,10 +62,24 @@ class OutputLimitError(MCPError):
 
 @dataclass(frozen=True)
 class MCPTool:
-    """One tool advertised by an MCP server (name plus human description)."""
+    """One tool advertised by an MCP server.
+
+    ``input_schema`` is the tool's advertised JSON Schema for its arguments
+    (empty dict when the server does not declare one); calls are validated
+    against it before any request leaves the client.
+    """
 
     name: str
     description: str
+    input_schema: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CallResult:
+    """Outcome of one tools/call: redacted text content plus the error flag."""
+
+    text: str
+    is_error: bool
 
 
 @dataclass(frozen=True)
@@ -234,13 +251,62 @@ class MCPClient:
         for entry in tools_raw:
             if isinstance(entry, dict) and isinstance(entry.get("name"), str):
                 description = entry.get("description")
+                schema = entry.get("inputSchema")
                 tools.append(
                     MCPTool(
                         name=entry["name"],
                         description=description if isinstance(description, str) else "",
+                        input_schema=schema if isinstance(schema, dict) else {},
                     )
                 )
         return tuple(tools)
+
+    def call_tool(
+        self, name: str, arguments: dict[str, Any] | None = None
+    ) -> CallResult:
+        """Invoke one advertised tool.
+
+        Arguments are validated against the tool's advertised inputSchema
+        before the request is sent; text content comes back redacted through
+        the default redactor. Raises MCPError on unknown tools, invalid
+        arguments, transport failures and server-side call errors.
+        """
+
+        args = arguments or {}
+        if not isinstance(args, dict):
+            raise MCPError("tool arguments must be a JSON object")
+        tools = {tool.name: tool for tool in self.list_tools()}
+        tool = tools.get(name)
+        if tool is None:
+            raise MCPError(
+                f"server {self._server.name!r} has no tool {name!r} "
+                f"(advertised: {sorted(tools)})"
+            )
+        if tool.input_schema:
+            try:
+                jsonschema.validate(args, tool.input_schema)
+            except jsonschema.ValidationError as exc:
+                raise MCPError(
+                    f"invalid arguments for {name!r}: {exc.message}"
+                ) from exc
+        self._audit("planned")
+        try:
+            result = self._request("tools/call", {"name": name, "arguments": args})
+        except MCPError:
+            raise
+        content = result.get("content") if isinstance(result, dict) else None
+        if not isinstance(content, list):
+            raise MCPError(f"server {self._server.name!r} returned invalid tools/call")
+        parts: list[str] = []
+        for entry in content:
+            if isinstance(entry, dict) and entry.get("type") == "text":
+                text = entry.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        is_error = bool(result.get("isError")) if isinstance(result, dict) else False
+        self._audit("failed" if is_error else "finished")
+        redacted = default_redactor().redact_text("\n".join(parts))
+        return CallResult(text=redacted, is_error=is_error)
 
     def ping(self) -> None:
         """Liveness check; raises on failure."""
