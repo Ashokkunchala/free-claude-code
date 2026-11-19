@@ -1,10 +1,12 @@
-"""``fcc-inspect``: read-only repository inspection.
+"""``fcc-inspect``: read-only repository and system inspection.
 
 Status, file reads, glob search and content grep, all confined to the
-workspace root and all available as JSON for scripting. Everything here is
-R0 (read-only) by construction: this command never writes.
+workspace root, plus running processes and listening ports, all available
+as JSON for scripting. Everything here is R0 (read-only) by construction:
+this command never writes.
 """
 
+import dataclasses
 import json
 import sys
 from collections.abc import Sequence
@@ -20,13 +22,19 @@ from free_claude_code.repo import (
 )
 from free_claude_code.repo.git import GitError, GitRepo
 from free_claude_code.terminal import (
+    SystemInspectError,
     collect_env_context,
+    collect_listeners,
+    collect_processes,
     load_run_history,
     render_env_context,
+    render_listeners,
+    render_processes,
     render_run_summary,
 )
 
 _DEFAULT_GREP_LIMIT = 100
+_DEFAULT_PROCESS_LIMIT = 50
 
 
 def _git_section(root: Path) -> dict[str, Any]:
@@ -65,6 +73,18 @@ def main(argv: Sequence[str] | None = None) -> None:
     subparsers.add_parser("status", help="Git state and workspace summary")
 
     subparsers.add_parser("env", help="Platform, shell, git and workspace listing")
+
+    processes_parser = subparsers.add_parser(
+        "processes", help="Running processes (pid, memory, command)"
+    )
+    processes_parser.add_argument(
+        "--limit",
+        type=int,
+        default=_DEFAULT_PROCESS_LIMIT,
+        help=f"Maximum processes shown (default {_DEFAULT_PROCESS_LIMIT})",
+    )
+
+    subparsers.add_parser("ports", help="Listening TCP/UDP sockets")
 
     runs_parser = subparsers.add_parser("runs", help="Recorded run reports")
     runs_parser.add_argument(
@@ -124,6 +144,46 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         else:
             print(render_env_context(context))
+        return
+
+    if args.command == "processes":
+        try:
+            processes = collect_processes()
+        except SystemInspectError as exc:
+            print(f"fcc-inspect: {exc}", file=sys.stderr)
+            raise SystemExit(1) from None
+        processes.sort(key=lambda p: (p.rss_bytes is None, -(p.rss_bytes or 0)))
+        shown = processes[: args.limit]
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "processes": [dataclasses.asdict(p) for p in shown],
+                        "total": len(processes),
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(render_processes(shown, total=len(processes)))
+        return
+
+    if args.command == "ports":
+        try:
+            listeners = collect_listeners()
+        except SystemInspectError as exc:
+            print(f"fcc-inspect: {exc}", file=sys.stderr)
+            raise SystemExit(1) from None
+        listeners.sort(key=lambda listener: (listener.protocol, listener.port))
+        if args.json:
+            print(
+                json.dumps(
+                    [dataclasses.asdict(listener) for listener in listeners],
+                    indent=2,
+                )
+            )
+        else:
+            print(render_listeners(listeners))
         return
 
     if args.command == "runs":
