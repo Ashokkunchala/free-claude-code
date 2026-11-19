@@ -82,6 +82,11 @@ class TerminalExecutor:
                 isolated=spec.isolated,
             )
         except (OSError, ValueError) as exc:
+            self._sink.record(
+                make_event(
+                    "failed", task, spec.argv, spec.cwd, policy_id=policy.policy_id
+                )
+            )
             raise SpawnError(spec.argv, str(exc)) from exc
         self._sink.record(
             make_event("started", task, spec.argv, spec.cwd, policy_id=policy.policy_id)
@@ -94,6 +99,11 @@ class TerminalExecutor:
             if process.stdout is None or process.stderr is None:
                 processes.kill_tree(process)
                 processes.untrack(process)
+                self._sink.record(
+                    make_event(
+                        "failed", task, spec.argv, spec.cwd, policy_id=policy.policy_id
+                    )
+                )
                 raise SpawnError(spec.argv, "child stdio pipes were not created")
             readers = [
                 self._start_reader(
@@ -122,6 +132,8 @@ class TerminalExecutor:
             kind = "timed_out"
         elif cancelled:
             kind = "cancelled"
+        elif exit_code != 0:
+            kind = "failed"
         else:
             kind = "finished"
         self._sink.record(

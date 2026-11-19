@@ -37,6 +37,7 @@ from free_claude_code.terminal.approval_store import (
     ApprovalRecord,
     FileApprovalStore,
 )
+from free_claude_code.terminal.audit import make_event, record_decision
 
 EXIT_ERROR = 1
 EXIT_APPROVAL_REQUIRED = 3
@@ -196,7 +197,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise SystemExit(EXIT_POLICY_DENIED)
 
     audit_path = args.audit_file if args.audit_file is not None else audit_log_path()
-    executor = TerminalExecutor(sink=JsonlAuditSink(audit_path))
+    executor_sink = JsonlAuditSink(audit_path)
+    executor = TerminalExecutor(sink=executor_sink)
     task_id = args.task_id if args.task_id else uuid.uuid4().hex
 
     if verdict.requirement is Requirement.ALLOW:
@@ -222,6 +224,14 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     grant = _matching_grant(records, spec=spec, task_id=task_id, issuer=issuer)
     if grant is not None:
+        record_decision(
+            executor_sink,
+            granted=True,
+            task_id=task_id,
+            argv=spec.argv,
+            cwd=spec.cwd,
+            policy_id=verdict.policy_id,
+        )
         raise SystemExit(
             _run(
                 executor,
@@ -235,12 +245,29 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     denial = _denial_for(records, spec=spec, task_id=task_id)
     if denial is not None:
+        record_decision(
+            executor_sink,
+            granted=False,
+            task_id=task_id,
+            argv=spec.argv,
+            cwd=spec.cwd,
+            policy_id=verdict.policy_id,
+        )
         detail = f": {denial.decision_reason}" if denial.decision_reason else ""
         print(f"approval denied{detail}", file=sys.stderr)
         raise SystemExit(EXIT_POLICY_DENIED)
 
     pending = _pending_for(records, spec=spec, task_id=task_id)
     if pending is None:
+        executor_sink.record(
+            make_event(
+                "approval_requested",
+                task_id,
+                spec.argv,
+                spec.cwd,
+                policy_id=verdict.policy_id,
+            )
+        )
         pending = store.request(
             spec,
             task_id=task_id,
