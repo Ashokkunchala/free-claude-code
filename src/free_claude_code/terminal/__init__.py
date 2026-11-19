@@ -49,6 +49,11 @@ from free_claude_code.terminal.policy import (
     RiskLevel,
 )
 from free_claude_code.terminal.redaction import Redactor
+from free_claude_code.terminal.report import (
+    append_run_record,
+    load_run_history,
+    render_run_summary,
+)
 from free_claude_code.terminal.result import CommandResult, OutputChunk
 from free_claude_code.terminal.run import (
     PlanError,
@@ -110,15 +115,18 @@ __all__ = [
     "TerminalExecutor",
     "TerminalExecutorError",
     "VerifySpec",
+    "append_run_record",
     "build_plan_prompt",
     "build_repair_prompt",
     "collect_env_context",
     "command_fingerprint",
     "extract_plan_json",
+    "load_run_history",
     "plan_from_response",
     "plan_model_from_env",
     "propose_plan",
     "propose_plan_with_feedback",
     "propose_repair",
     "render_env_context",
+    "render_run_summary",
 ]
