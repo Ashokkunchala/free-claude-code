@@ -218,3 +218,59 @@ def test_task_no_context_passes_none(capsys, tmp_path, monkeypatch):
         ["--task", "g", "--no-context", *base_args(tmp_path, tmp_path / "x")[1:]]
     )
     assert code == 0
+
+
+def test_task_repair_loop_recovers(capsys, tmp_path, monkeypatch):
+    import subprocess
+
+    from free_claude_code.cli import run as run_cli
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
+
+    def fake_propose(task, model, *, workspace, context, attempts):
+        return run_cli.RunPlan.from_dict(
+            {
+                "goal": "g",
+                "steps": [{"id": "s1", "title": "bad", "argv": ["false"]}],
+            }
+        )
+
+    def fake_repair(task, report, model, *, workspace, context, attempts):
+        assert report.status == "failed"
+        return run_cli.RunPlan.from_dict(
+            {
+                "goal": "g",
+                "steps": [{"id": "r1", "title": "ok", "argv": ["git", "status"]}],
+            }
+        )
+
+    monkeypatch.setattr(run_cli, "propose_plan_with_feedback", fake_propose)
+    monkeypatch.setattr(run_cli, "propose_repair", fake_repair)
+    code = invoke(
+        [
+            "--task",
+            "g",
+            "--repair-attempts",
+            "1",
+            *base_args(tmp_path, tmp_path / "x")[1:],
+        ]
+    )
+    assert code == 0
+    assert "status: ok" in capsys.readouterr().out
+
+
+def test_task_without_repair_attempts_stays_failed(capsys, tmp_path, monkeypatch):
+    from free_claude_code.cli import run as run_cli
+
+    monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
+
+    def fake_propose(task, model, *, workspace, context, attempts):
+        return run_cli.RunPlan.from_dict(
+            {"goal": "g", "steps": [{"id": "s1", "title": "bad", "argv": ["false"]}]}
+        )
+
+    monkeypatch.setattr(run_cli, "propose_plan_with_feedback", fake_propose)
+    code = invoke(["--task", "g", *base_args(tmp_path, tmp_path / "x")[1:]])
+    assert code == 1
+    assert "status: failed" in capsys.readouterr().out
