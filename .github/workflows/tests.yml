@@ -110,7 +110,10 @@ jobs:
   playwright:
     name: playwright (${{ matrix.os }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    # Windows runners periodically degrade to a crawl (jobs cancelled at the
+    # 15-minute timeout on PRs #48-#50 while the same suite takes ~6 minutes
+    # on a healthy runner); a longer budget absorbs slow runs without re-runs.
+    timeout-minutes: ${{ matrix.timeout }}
     permissions:
       contents: read
     strategy:
@@ -119,10 +122,13 @@ jobs:
         include:
           - os: Linux
             runner: ubuntu-latest
+            timeout: 15
           - os: Windows
             runner: windows-latest
+            timeout: 25
           - os: macOS
             runner: macos-latest
+            timeout: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
