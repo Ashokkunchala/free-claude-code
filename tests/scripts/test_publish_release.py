@@ -65,6 +65,7 @@ class FakeRemote:
         self.fail = None
         self.builds = 0
         self.uploaded = {}
+        self.pulls: dict[int, str] = {}
         self.real_command = publishing.command
 
     def command(self, args, *, cwd=None):
@@ -82,6 +83,9 @@ class FakeRemote:
                 for flag, field in pairwise(args)
                 if flag in {"-f", "-F"}
             )
+            if "/pulls/" in endpoint:
+                number = int(endpoint.rsplit("/", 1)[1])
+                return json.dumps({"title": self.pulls[number]})
             if endpoint.endswith("?per_page=100"):
                 return json.dumps([list(self.releases.values())])
             if endpoint.endswith("/generate-notes"):
@@ -266,6 +270,34 @@ def test_target_must_be_main_ancestor(releases):
     head = commit(repo, "patch: Other")
     with pytest.raises(ValueError, match="main"):
         remote.publisher().publish(head)
+
+
+def test_squash_title_falls_back_to_pull_request_title(releases):
+    _, remote = releases
+    head = remote.advance("feat(cli): Squashed subject (#12)")
+    remote.pulls[12] = "minor: Squashed subject"
+    remote.publisher().publish(head)
+    assert "v1.3.0" in remote.releases
+    assert not remote.releases["v1.3.0"]["draft"]
+    assert any(
+        call[:2] == ["gh", "api"] and call[2].endswith("/pulls/12")
+        for call in remote.calls
+    )
+
+
+def test_pull_request_title_without_prefix_cannot_publish(releases):
+    _, remote = releases
+    head = remote.advance("feat(cli): Squashed subject (#12)")
+    remote.pulls[12] = "feat(cli): Squashed subject"
+    with pytest.raises(ValueError, match="require"):
+        remote.publisher().publish(head)
+
+
+def test_subject_prefix_skips_pull_request_lookup(releases):
+    _, remote = releases
+    head = remote.advance("patch: Change (#12)")
+    remote.publisher().publish(head)
+    assert "v1.2.4" in remote.releases
 
 
 def test_malformed_or_bypassed_title_cannot_publish(releases):

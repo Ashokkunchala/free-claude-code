@@ -82,7 +82,19 @@ class Publisher:
         if target not in history:
             raise ValueError("Release target is not on main's first-parent history")
         title = git("show", "-s", "--format=%s", target)
-        kind = release_kind(title, changed_paths(f"{target}^", target))
+        paths = changed_paths(f"{target}^", target)
+        try:
+            kind = release_kind(title, paths)
+        except ValueError:
+            squash = re.search(r"\(#(\d+)\)$", title)
+            if not squash:
+                raise
+            # Squash merges of single-commit pull requests keep the commit
+            # subject, so the release prefix lives on the pull request title.
+            title = json.loads(
+                command(["gh", "api", f"repos/{self.repository}/pulls/{squash[1]}"])
+            )["title"]
+            kind = release_kind(title, paths)
         if kind is None:
             print(f"No release for {target}")
             return
