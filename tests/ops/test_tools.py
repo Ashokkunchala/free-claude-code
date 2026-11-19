@@ -13,6 +13,7 @@ def test_registry_covers_the_devops_set() -> None:
         ToolKind.AWS,
         ToolKind.AZ,
         ToolKind.GCLOUD,
+        ToolKind.JOURNALCTL,
     }
 
 

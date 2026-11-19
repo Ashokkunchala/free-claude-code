@@ -282,6 +282,7 @@ _READ_VERBS = frozenset(
         "ls",
         "outdated",
         "ps",
+        "read",
         "search",
         "show",
         "stats",
@@ -352,6 +353,7 @@ _VERB_SENSITIVE = frozenset(
     {
         "docker",
         "helm",
+        "journalctl",
         "kubectl",
         "podman",
         "service",
@@ -360,6 +362,9 @@ _VERB_SENSITIVE = frozenset(
         "tofu",
     }
 )
+
+# journalctl flags that delete, rotate or flush journal files.
+_JOURNALCTL_WRITES = frozenset({"--rotate", "--flush", "--sync", "--relinquish-var"})
 
 
 def _basename(argv0: str) -> str:
@@ -497,6 +502,13 @@ def _classify_verb_command(name: str, args: tuple[str, ...]) -> tuple[RiskLevel,
         if verbs and any(verb in _READ_VERBS for verb in verbs):
             return RiskLevel.R0_READ_ONLY, f"{name}:read"
         return RiskLevel.R2_PRIVILEGED, f"{name}:write"
+    if name == "journalctl":
+        flags = _flags(args)
+        if any(flag.startswith("--vacuum") for flag in flags):
+            return RiskLevel.R2_PRIVILEGED, "journalctl:vacuum"
+        if flags & _JOURNALCTL_WRITES:
+            return RiskLevel.R2_PRIVILEGED, "journalctl:write"
+        return RiskLevel.R0_READ_ONLY, "journalctl:read"
     # Cloud CLIs use compound verbs like `describe-instances`; match stems.
     if verbs and any(
         verb in _READ_VERBS or verb.split("-")[0] in _READ_VERBS for verb in verbs[:4]
