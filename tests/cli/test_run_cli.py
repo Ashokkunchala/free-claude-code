@@ -155,7 +155,7 @@ def test_task_generates_and_runs_plan(capsys, tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(run_cli, "propose_plan_with_feedback", fake_propose)
-    code = invoke(["--task", "say hi"] + base_args(tmp_path, tmp_path / "x")[1:])
+    code = invoke(["--task", "say hi", *base_args(tmp_path, tmp_path / "x")[1:]])
     assert code == 0
     assert "status: ok" in capsys.readouterr().out
 
@@ -169,7 +169,7 @@ def test_task_without_model_config_exits_one(capsys, tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(run_cli, "plan_model_from_env", boom)
-    code = invoke(["--task", "anything"] + base_args(tmp_path, tmp_path / "x")[1:])
+    code = invoke(["--task", "anything", *base_args(tmp_path, tmp_path / "x")[1:]])
     assert code == 1
     assert "not configured" in capsys.readouterr().err
 
@@ -183,13 +183,13 @@ def test_task_rejects_junk_model_response(capsys, tmp_path, monkeypatch):
         raise run_cli.PlanError("model response is not valid JSON")
 
     monkeypatch.setattr(run_cli, "propose_plan_with_feedback", junk)
-    code = invoke(["--task", "anything"] + base_args(tmp_path, tmp_path / "x")[1:])
+    code = invoke(["--task", "anything", *base_args(tmp_path, tmp_path / "x")[1:]])
     assert code == 2
     assert "did not produce a valid plan" in capsys.readouterr().err
 
 
 def test_task_and_plan_file_are_exclusive(capsys, tmp_path, plan_file):
     path = plan_file([{"id": "s1", "title": "x", "argv": py("pass")}])
-    code = invoke(base_args(tmp_path, path) + ["--task", "both"])
+    code = invoke([*base_args(tmp_path, path), "--task", "both"])
     assert code == 1
     assert "not both" in capsys.readouterr().err
