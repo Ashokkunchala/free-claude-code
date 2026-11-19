@@ -1,0 +1,23 @@
+name = "docker-triage"
+version = "0.1.0"
+purpose = "Inspect Docker images, containers and Compose stacks to diagnose build and runtime failures"
+platforms = ["linux", "macos", "windows"]
+required_tools = ["docker"]
+max_risk = "r2"
+approval_from = "r2"
+timeout_seconds = 900
+rollback = "Inspection is read-only; container or image changes require explicit approval and are reverted by removing only resources this skill created"
+verification = ["docker info succeeds against the target daemon", "Findings cite container or image IDs, not guesses"]
+executable = false
+
+[[tools]]
+name = "inspect-container"
+description = "Capture docker inspect, logs tail and resource usage for one container"
+timeout_seconds = 120
+max_output_bytes = 524288
+
+[[tools]]
+name = "compose-status"
+description = "Summarize Compose service states, restart counts and recent logs for one project"
+timeout_seconds = 120
+max_output_bytes = 524288

@@ -1,0 +1,23 @@
+name = "ci-triage"
+version = "0.1.0"
+purpose = "Diagnose CI failures, analyze flaky tests and prepare build and release evidence"
+platforms = ["linux", "macos", "windows"]
+required_tools = ["git"]
+max_risk = "r1"
+approval_from = "r2"
+timeout_seconds = 900
+rollback = "Read-only diagnosis only; no rollback applies"
+verification = ["Failing job logs collected and root cause stated", "Flake pattern confirmed against at least two runs"]
+executable = false
+
+[[tools]]
+name = "collect-failing-jobs"
+description = "Collect failing CI job names, log excerpts and rerun history for one change"
+timeout_seconds = 300
+max_output_bytes = 524288
+
+[[tools]]
+name = "flake-history"
+description = "Summarize a test's pass/fail pattern across recent CI runs to separate flakes from regressions"
+timeout_seconds = 300
+max_output_bytes = 262144

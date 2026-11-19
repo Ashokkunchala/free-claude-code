@@ -40,7 +40,14 @@ def test_list_shows_packs_and_state(tmp_path, capsys):
 def test_list_json(tmp_path, capsys):
     make_pack(tmp_path, "docker-triage")
     out = run_cli(
-        capsys, "--packs", tmp_path, "--state", tmp_path / "s.json", "--json", "list"
+        capsys,
+        "--packs",
+        tmp_path,
+        "--no-bundled",
+        "--state",
+        tmp_path / "s.json",
+        "--json",
+        "list",
     )
     packs = json.loads(out.out)["packs"]
     assert packs[0]["name"] == "docker-triage"
@@ -49,7 +56,15 @@ def test_list_json(tmp_path, capsys):
 
 
 def test_list_empty(tmp_path, capsys):
-    out = run_cli(capsys, "--packs", tmp_path, "--state", tmp_path / "s.json", "list")
+    out = run_cli(
+        capsys,
+        "--packs",
+        tmp_path,
+        "--no-bundled",
+        "--state",
+        tmp_path / "s.json",
+        "list",
+    )
     assert "No skill packs found." in out.out
 
 
@@ -126,3 +141,22 @@ def test_validate_all_under_packs_root(tmp_path, capsys):
         )
     assert caught.value.code == 0
     assert "docker-triage: ok" in capsys.readouterr().out
+
+
+def test_default_list_includes_bundled_packs(tmp_path, capsys):
+    out = run_cli(capsys, "--state", tmp_path / "s.json", "list")
+    assert "ci-triage" in out.out
+    assert "docker-triage" in out.out
+    assert "k8s-inspect" in out.out
+
+
+def test_user_pack_shadows_bundled_pack(tmp_path, capsys):
+    user = tmp_path / "packs"
+    make_pack(
+        user,
+        "ci-triage",
+        body=MANIFEST.replace("docker-triage", "ci-triage").replace("0.1.0", "9.9.9"),
+    )
+    out = run_cli(capsys, "--packs", user, "--state", tmp_path / "s.json", "list")
+    assert "ci-triage 9.9.9" in out.out
+    assert "ci-triage 0.1.0" not in out.out

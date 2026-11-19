@@ -20,6 +20,12 @@ def default_packs_dir() -> Path:
     return config_dir_path() / PACKS_DIRNAME
 
 
+def bundled_packs_dir() -> Path:
+    """Return the read-only directory of skill packs shipped with FCC."""
+
+    return Path(__file__).resolve().parents[1] / "assets" / PACKS_DIRNAME
+
+
 def default_state_path() -> Path:
     """Return the default enabled/disabled state file."""
 
