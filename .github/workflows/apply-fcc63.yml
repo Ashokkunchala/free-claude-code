@@ -1,0 +1,79 @@
+name: Apply patch fcc63
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [chore/apply-fcc63]
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Decode patch
+        run: |
+          cat > /tmp/patch.b64 <<'EOF'
+          RnJvbSBlZDhjNzY5ZjBkNjc1OWMzYWQ1ZDEzYzQxNGNhOWY1ODQ1NzQ0MjY1IE1vbiBTZXAg
+          MTcgMDA6MDA6MDAgMjAwMQpGcm9tOiBmY2MtYWdlbnQgPGZjYy1hZ2VudEBsb2NhbGhvc3Q+
+          CkRhdGU6IEZyaSwgMjAgTm92IDIwMjYgMDM6NDA6MDUgKzA1MzAKU3ViamVjdDogW1BBVENI
+          XSBHaXZlIFdpbmRvd3MgcGxheXdyaWdodCBDSSBhIDI1LW1pbnV0ZSBqb2IgdGltZW91dAoK
+          V2luZG93cyBydW5uZXJzIHBlcmlvZGljYWxseSBkZWdyYWRlIHRvIGEgY3Jhd2wgb3Zlcm5p
+          Z2h0OiB0aGUgZmlyc3QKcGxheXdyaWdodCBhdHRlbXB0cyBvbiBQUnMgIzQ4LCAjNDkgYW5k
+          ICM1MCB3ZXJlIGFsbCBjYW5jZWxsZWQgYXQgdGhlCjE1LW1pbnV0ZSBqb2IgdGltZW91dCwg
+          dGhlbiBhIGxhdGVyIGF0dGVtcHQgZmluaXNoZWQgaW4gfjYgbWludXRlcyBhdApub3JtYWwg
+          c3BlZWQuIEEgcGVyLU9TIHRpbWVvdXQgKDI1IG1pbnV0ZXMgZm9yIFdpbmRvd3MsIDE1IHVu
+          Y2hhbmdlZApmb3IgTGludXgvbWFjT1MpIGFic29yYnMgc2xvdyBydW5zIHdpdGhvdXQgbWFu
+          dWFsIHJlLXJ1bnMuCi0tLQogLmdpdGh1Yi93b3JrZmxvd3MvdGVzdHMueW1sICAgICAgIHwg
+          IDggKysrKysrKy0KIHRlc3RzL2NvbnRyYWN0cy90ZXN0X3V2X3BvbGljeS5weSB8IDExICsr
+          KysrKysrKysrCiAyIGZpbGVzIGNoYW5nZWQsIDE4IGluc2VydGlvbnMoKyksIDEgZGVsZXRp
+          b24oLSkKCmRpZmYgLS1naXQgYS8uZ2l0aHViL3dvcmtmbG93cy90ZXN0cy55bWwgYi8uZ2l0
+          aHViL3dvcmtmbG93cy90ZXN0cy55bWwKaW5kZXggMTVmNDA2OS4uN2Q2Y2E5YyAxMDA2NDQK
+          LS0tIGEvLmdpdGh1Yi93b3JrZmxvd3MvdGVzdHMueW1sCisrKyBiLy5naXRodWIvd29ya2Zs
+          b3dzL3Rlc3RzLnltbApAQCAtMTEwLDcgKzExMCwxMCBAQCBqb2JzOgogICBwbGF5d3JpZ2h0
+          OgogICAgIG5hbWU6IHBsYXl3cmlnaHQgKCR7eyBtYXRyaXgub3MgfX0pCiAgICAgcnVucy1v
+          bjogJHt7IG1hdHJpeC5ydW5uZXIgfX0KLSAgICB0aW1lb3V0LW1pbnV0ZXM6IDE1CisgICAg
+          IyBXaW5kb3dzIHJ1bm5lcnMgcGVyaW9kaWNhbGx5IGRlZ3JhZGUgdG8gYSBjcmF3bCAoam9i
+          cyBjYW5jZWxsZWQgYXQgdGhlCisgICAgIyAxNS1taW51dGUgdGltZW91dCBvbiBQUnMgIzQ4
+          LSM1MCB3aGlsZSB0aGUgc2FtZSBzdWl0ZSB0YWtlcyB+NiBtaW51dGVzCisgICAgIyBvbiBh
+          IGhlYWx0aHkgcnVubmVyKTsgYSBsb25nZXIgYnVkZ2V0IGFic29yYnMgc2xvdyBydW5zIHdp
+          dGhvdXQgcmUtcnVucy4KKyAgICB0aW1lb3V0LW1pbnV0ZXM6ICR7eyBtYXRyaXgudGltZW91
+          dCB9fQogICAgIHBlcm1pc3Npb25zOgogICAgICAgY29udGVudHM6IHJlYWQKICAgICBzdHJh
+          dGVneToKQEAgLTExOSwxMCArMTIyLDEzIEBAIGpvYnM6CiAgICAgICAgIGluY2x1ZGU6CiAg
+          ICAgICAgICAgLSBvczogTGludXgKICAgICAgICAgICAgIHJ1bm5lcjogdWJ1bnR1LWxhdGVz
+          dAorICAgICAgICAgICAgdGltZW91dDogMTUKICAgICAgICAgICAtIG9zOiBXaW5kb3dzCiAg
+          ICAgICAgICAgICBydW5uZXI6IHdpbmRvd3MtbGF0ZXN0CisgICAgICAgICAgICB0aW1lb3V0
+          OiAyNQogICAgICAgICAgIC0gb3M6IG1hY09TCiAgICAgICAgICAgICBydW5uZXI6IG1hY29z
+          LWxhdGVzdAorICAgICAgICAgICAgdGltZW91dDogMTUKICAgICBzdGVwczoKICAgICAgIC0g
+          dXNlczogYWN0aW9ucy9jaGVja291dEAzZDNjNDJlNWFhYzViYTgwNTgyNWRhNzY0MTBjMTgx
+          MjczYmE5MGIxCiAgICAgICAgIHdpdGg6CmRpZmYgLS1naXQgYS90ZXN0cy9jb250cmFjdHMv
+          dGVzdF91dl9wb2xpY3kucHkgYi90ZXN0cy9jb250cmFjdHMvdGVzdF91dl9wb2xpY3kucHkK
+          aW5kZXggNTk2MGMyNC4uNzk0Y2ZiMSAxMDA2NDQKLS0tIGEvdGVzdHMvY29udHJhY3RzL3Rl
+          c3RfdXZfcG9saWN5LnB5CisrKyBiL3Rlc3RzL2NvbnRyYWN0cy90ZXN0X3V2X3BvbGljeS5w
+          eQpAQCAtMTkwLDMgKzE5MCwxNCBAQCBkZWYgdGVzdF9zaGFyZWRfc2V0dXBfaW5zdGFsbHNf
+          ZGVwZW5kZW5jaWVzX2V4Y2VwdF9mb3JfcG9zdF9tZXJnZV9qb2JzKCkgLT4gTm9uZQogICAg
+          ICAgICAgICAgICAgICAgICAgICAgImZhbHNlIiBpZiBwYXRoLm5hbWUgPT0gInBvc3QtbWVy
+          Z2UueW1sIiBlbHNlICJ0cnVlIgogICAgICAgICAgICAgICAgICAgICApCiAgICAgICAgICAg
+          ICAgICAgYXNzZXJ0IHN0ZXAuZ2V0KCJydW4iKSAhPSAidXYgc3luYyAtLWxvY2tlZCAtLWdy
+          b3VwIGRldiIKKworCitkZWYgdGVzdF93aW5kb3dzX3BsYXl3cmlnaHRfZ2V0c19hX2xvbmdl
+          cl9qb2JfdGltZW91dCgpIC0+IE5vbmU6CisgICAgIiIiT3Zlcm5pZ2h0IFdpbmRvd3MgcnVu
+          bmVyIGRlZ3JhZGF0aW9uIGNhbmNlbGxlZCAxNS1taW51dGUgam9icyAoUFJzIDQ4LTUwKS4i
+          IiIKKyAgICB3b3JrZmxvdyA9IHlhbWwuc2FmZV9sb2FkKFVWX1dPUktGTE9XU1swXS5yZWFk
+          X3RleHQoZW5jb2Rpbmc9InV0Zi04IikpCisgICAgam9iID0gd29ya2Zsb3dbImpvYnMiXVsi
+          cGxheXdyaWdodCJdCisgICAgYXNzZXJ0IGpvYlsidGltZW91dC1taW51dGVzIl0gPT0gIiR7
+          eyBtYXRyaXgudGltZW91dCB9fSIKKyAgICB0aW1lb3V0cyA9IHsKKyAgICAgICAgZW50cnlb
+          Im9zIl06IGVudHJ5WyJ0aW1lb3V0Il0gZm9yIGVudHJ5IGluIGpvYlsic3RyYXRlZ3kiXVsi
+          bWF0cml4Il1bImluY2x1ZGUiXQorICAgIH0KKyAgICBhc3NlcnQgdGltZW91dHMgPT0geyJM
+          aW51eCI6IDE1LCAiV2luZG93cyI6IDI1LCAibWFjT1MiOiAxNX0KLS0gCjIuMzQuMQoK
+          EOF
+          base64 -d /tmp/patch.b64 > /tmp/change.patch
+      - name: Apply and push
+        run: |
+          git config user.name "fcc-bot"
+          git config user.email "fcc-bot@users.noreply.github.com"
+          git checkout -b fix/ci-windows-playwright-timeout || git checkout fix/ci-windows-playwright-timeout
+          git am --3way /tmp/change.patch
+          git push --force-with-lease origin HEAD:fix/ci-windows-playwright-timeout
