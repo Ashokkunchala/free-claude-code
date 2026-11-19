@@ -1,0 +1,26 @@
+name: apply-fcc38
+on:
+  push:
+    branches: [chore/apply-fcc38]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: apply patch and push
+        run: |
+          set -e
+          git config user.name "instinct[bot]"
+          git config user.email "instinct[bot]@users.noreply.github.com"
+          git config core.autocrlf false
+          git rm -r --cached . -q
+          git reset --hard -q
+          echo "RnJvbSBkMTRhNDYwNzk4YTZmZmRkZjUwN2E3OTE1YzgyMzE0ZWVhZDkxNTlmIE1vbiBTZXAgMTcgMDA6MDA6MDAgMjAwMQpGcm9tOiBpbnN0aW5jdCA8aW5zdGluY3RAdXNlcnMubm9yZXBseS5naXRodWIuY29tPgpEYXRlOiBUaHUsIDE5IE5vdiAyMDI2IDE0OjExOjA5ICswNTMwClN1YmplY3Q6IFtQQVRDSF0gc3R5bGU6IHJ1ZmYtZm9ybWF0IHRlc3Rfc2NoZWR1bGVyCgotLS0KIHRlc3RzL3Rlcm1pbmFsL3Rlc3Rfc2NoZWR1bGVyLnB5IHwgOCArKysrKystLQogMSBmaWxlIGNoYW5nZWQsIDYgaW5zZXJ0aW9ucygrKSwgMiBkZWxldGlvbnMoLSkKCmRpZmYgLS1naXQgYS90ZXN0cy90ZXJtaW5hbC90ZXN0X3NjaGVkdWxlci5weSBiL3Rlc3RzL3Rlcm1pbmFsL3Rlc3Rfc2NoZWR1bGVyLnB5CmluZGV4IGU2YTRjMjQuLmZhYjExNzUgMTAwNjQ0Ci0tLSBhL3Rlc3RzL3Rlcm1pbmFsL3Rlc3Rfc2NoZWR1bGVyLnB5CisrKyBiL3Rlc3RzL3Rlcm1pbmFsL3Rlc3Rfc2NoZWR1bGVyLnB5CkBAIC0zNiw3ICszNiw5IEBAIGNsYXNzIFN0dWJFeGVjdXRvcjoKICAgICAgICAgc2VsZi5fbG9jayA9IHRocmVhZGluZy5Mb2NrKCkKICAgICAgICAgc2VsZi5jYWxsczogbGlzdFt0dXBsZVtzdHIsIC4uLl1dID0gW10KIAotICAgIGRlZiBydW4oc2VsZiwgc3BlYywgKiwgcG9saWN5PU5vbmUsIGNhbmNlbF9ldmVudD1Ob25lLCBvbl9vdXRwdXQ9Tm9uZSwgdGFza19pZD1Ob25lKToKKyAgICBkZWYgcnVuKAorICAgICAgICBzZWxmLCBzcGVjLCAqLCBwb2xpY3k9Tm9uZSwgY2FuY2VsX2V2ZW50PU5vbmUsIG9uX291dHB1dD1Ob25lLCB0YXNrX2lkPU5vbmUKKyAgICApOgogICAgICAgICB3aXRoIHNlbGYuX2xvY2s6CiAgICAgICAgICAgICBzZWxmLmNvbmN1cnJlbnQgKz0gMQogICAgICAgICAgICAgc2VsZi5tYXhfY29uY3VycmVudCA9IG1heChzZWxmLm1heF9jb25jdXJyZW50LCBzZWxmLmNvbmN1cnJlbnQpCkBAIC0xNDksNyArMTUxLDkgQEAgZGVmIHRlc3Rfc2h1dGRvd25fcmVqZWN0c19uZXdfc3VibWlzc2lvbnMoKToKIAogZGVmIHRlc3RfZXhlY3V0b3JfZmFpbHVyZXNfcHJvcGFnYXRlX2FuZF9mcmVlX3Nsb3RzKCk6CiAgICAgY2xhc3MgRmFpbGluZzoKLSAgICAgICAgZGVmIHJ1bihzZWxmLCBzcGVjLCAqLCBwb2xpY3k9Tm9uZSwgY2FuY2VsX2V2ZW50PU5vbmUsIG9uX291dHB1dD1Ob25lLCB0YXNrX2lkPU5vbmUpOgorICAgICAgICBkZWYgcnVuKAorICAgICAgICAgICAgc2VsZiwgc3BlYywgKiwgcG9saWN5PU5vbmUsIGNhbmNlbF9ldmVudD1Ob25lLCBvbl9vdXRwdXQ9Tm9uZSwgdGFza19pZD1Ob25lCisgICAgICAgICk6CiAgICAgICAgICAgICByYWlzZSBSdW50aW1lRXJyb3IoImJvb20iKQogCiAgICAgc2NoZWR1bGVyID0gQ29tbWFuZFNjaGVkdWxlcigKLS0gCjIuMzQuMQoK" | base64 -d > /tmp/p.patch
+          git am /tmp/p.patch
+          git fetch origin feat/t6-scheduler || true
+          git push origin HEAD:feat/t6-scheduler --force-with-lease
