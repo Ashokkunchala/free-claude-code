@@ -1,0 +1,30 @@
+name: apply-fcc52
+on:
+  push:
+    branches: [chore/apply-fcc52]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feat/run-engine
+          fetch-depth: 0
+      - name: Restore raw blob bytes in worktree
+        run: |
+          git config core.autocrlf false
+          git rm -r -q --cached .
+          git reset -q --hard
+      - name: Decode patch
+        run: echo 'RnJvbSBkZTczYjczODJiOGU3NTY4MjM2NjAzMzRiNGIwNDQ0M2QyMDA4OGVkIE1vbiBTZXAgMTcgMDA6MDA6MDAgMjAwMQpGcm9tOiBJbnN0aW5jdCBBZ2VudCA8YWdlbnRAaW5zdGluY3QuY29tPgpEYXRlOiBUaHUsIDE5IE5vdiAyMDI2IDE4OjM0OjU1ICswNTMwClN1YmplY3Q6IFtQQVRDSF0gdGVzdCh0ZXJtaW5hbCk6IG5vcm1hbGl6ZSBweXRob24gYmFzZW5hbWUgZm9yIHBvbGljeQogZXh0cmFfYWxsb3cKClRoZSBwb2xpY3kgZW5naW5lJ3MgX2Jhc2VuYW1lIGxvd2VyY2FzZXMgYW5kIHN0cmlwcyB0aGUgLmV4ZSBzdWZmaXgsIHNvCm9uIFdpbmRvd3MgZXh0cmFfYWxsb3cgbXVzdCBob2xkICdweXRob24nLCBub3QgJ3B5dGhvbi5leGUnLiBNaXJyb3IgdGhhdApub3JtYWxpemF0aW9uIGluIHRoZSB0ZXN0IGhlbHBlcjsgZml4ZXMgdGhlIHRocmVlIFdpbmRvd3Mtb25seQphcHByb3ZhbF9yZXF1aXJlZCBmYWlsdXJlcyBpbiB0ZXN0cy90ZXJtaW5hbC90ZXN0X3J1bi5weS4KLS0tCiB0ZXN0cy90ZXJtaW5hbC90ZXN0X3J1bi5weSB8IDMgKystCiAxIGZpbGUgY2hhbmdlZCwgMiBpbnNlcnRpb25zKCspLCAxIGRlbGV0aW9uKC0pCgpkaWZmIC0tZ2l0IGEvdGVzdHMvdGVybWluYWwvdGVzdF9ydW4ucHkgYi90ZXN0cy90ZXJtaW5hbC90ZXN0X3J1bi5weQppbmRleCBjZDY0YTIwLi45ODI0YWMwIDEwMDY0NAotLS0gYS90ZXN0cy90ZXJtaW5hbC90ZXN0X3J1bi5weQorKysgYi90ZXN0cy90ZXJtaW5hbC90ZXN0X3J1bi5weQpAQCAtMTYsNyArMTYsOCBAQCBmcm9tIGZyZWVfY2xhdWRlX2NvZGUudGVybWluYWwuYXBwcm92YWwgaW1wb3J0IEFwcHJvdmFsVG9rZW5Jc3N1ZXIKIGZyb20gZnJlZV9jbGF1ZGVfY29kZS50ZXJtaW5hbC5wb2xpY3kgaW1wb3J0IFBvbGljeUNvbmZpZywgUG9saWN5RW5naW5lCiBmcm9tIHRlc3RzLnRlcm1pbmFsLmNvbmZ0ZXN0IGltcG9ydCBweQogCi1QWV9OQU1FID0gUGF0aChzeXMuZXhlY3V0YWJsZSkubmFtZQorIyBQb2xpY3kgYmFzZW5hbWVzIGxvd2VyY2FzZSBhbmQgc3RyaXAgIi5leGUiOyBtYXRjaCB0aGF0IG5vcm1hbGl6YXRpb24uCitQWV9OQU1FID0gUGF0aChzeXMuZXhlY3V0YWJsZSkubmFtZS5sb3dlcigpLnJlbW92ZXN1ZmZpeCgiLmV4ZSIpCiAKIAogZGVmIHBsYW4oc3RlcHMpOgotLSAKMi4zNC4xCgo=' | base64 -d > /tmp/series.patch
+      - name: Apply series
+        run: |
+          git config user.name "fcc-apply-bot"
+          git config user.email "fcc-apply-bot@users.noreply.github.com"
+          git am --keep-cr --whitespace=nowarn /tmp/series.patch
+      - name: Push branch
+        run: |
+          git fetch origin feat/run-engine || true
+          git push --force-with-lease origin HEAD:feat/run-engine
