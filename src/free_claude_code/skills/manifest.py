@@ -229,6 +229,7 @@ def parse_manifest(data: dict) -> SkillManifest:
 
     if issues:
         raise ValueError("Invalid skill manifest: " + "; ".join(issues))
+    assert max_risk is not None and approval_from is not None
     return SkillManifest(
         name=name,
         version=version,
