@@ -263,6 +263,10 @@ class MCPClient:
             if process.stderr is not None:
                 process.stderr.close()
         processes.kill_tree(process)
+        # Reap in every path: kill_tree can return early when the child
+        # already exited, and the Windows taskkill path never waits.
+        with contextlib.suppress(Exception):
+            process.wait(timeout=5)
         processes.untrack(process)
         self._audit("finished")
 
