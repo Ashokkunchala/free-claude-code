@@ -109,3 +109,32 @@ def test_drift_json(runner: FakeRunner, capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "clean"
     assert payload["to_destroy"] == 0
+
+
+def test_runbook_lists_builtins(runner: FakeRunner, capsys) -> None:
+    ops_cli.main(["runbook"])
+    out = capsys.readouterr().out
+    assert "pod-crashloop" in out
+    assert "terraform-drift" in out
+
+
+def test_runbook_runs_steps(runner: FakeRunner, capsys) -> None:
+    ops_cli.main(["runbook", "pod-crashloop", "--workload", "web", "-n", "prod"])
+    out = capsys.readouterr().out
+    assert "runbook: pod-crashloop" in out
+    assert "-- Current pod state and restart counts" in out
+    assert any(subject.startswith("pod-crashloop:") for subject in runner.plans)
+
+
+def test_runbook_unknown_exits_2(runner: FakeRunner, capsys) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        ops_cli.main(["runbook", "disk-full"])
+    assert excinfo.value.code == 2
+    assert "pod-crashloop" in capsys.readouterr().err
+
+
+def test_runbook_json(runner: FakeRunner, capsys) -> None:
+    ops_cli.main(["--json", "runbook", "node-pressure"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["runbook"] == "node-pressure"
+    assert len(payload["steps"]) == 3
