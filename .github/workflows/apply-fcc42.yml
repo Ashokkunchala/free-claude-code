@@ -1,0 +1,24 @@
+name: apply-fcc42
+on:
+  push:
+    branches: [chore/apply-fcc42]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/mcp-client
+          fetch-depth: 0
+      - name: apply patch and push
+        run: |
+          set -e
+          git config user.name "instinct[bot]"
+          git config user.email "instinct[bot]@users.noreply.github.com"
+          git config core.autocrlf false
+          echo "RnJvbSA3NTcxMDc4MDQ2MWRlMDE3NGY1NjZiNzI3YmYyMDYzNTgwODIxMmI3IE1vbiBTZXAgMTcgMDA6MDA6MDAgMjAwMQpGcm9tOiBpbnN0aW5jdCA8aW5zdGluY3RAdXNlcnMubm9yZXBseS5naXRodWIuY29tPgpEYXRlOiBUaHUsIDE5IE5vdiAyMDI2IDE1OjIzOjUwICswNTMwClN1YmplY3Q6IFtQQVRDSF0gZml4KG1jcCk6IHJlYXAgdGhlIHNlcnZlciBwcm9jZXNzIG9uIGNsb3NlIHNvIFBvcGVuIGlzIG5ldmVyCiBmaW5hbGl6ZWQgdW53YWl0ZWQKCi0tLQogc3JjL2ZyZWVfY2xhdWRlX2NvZGUvbWNwL2NsaWVudC5weSB8IDQgKysrKwogMSBmaWxlIGNoYW5nZWQsIDQgaW5zZXJ0aW9ucygrKQoKZGlmZiAtLWdpdCBhL3NyYy9mcmVlX2NsYXVkZV9jb2RlL21jcC9jbGllbnQucHkgYi9zcmMvZnJlZV9jbGF1ZGVfY29kZS9tY3AvY2xpZW50LnB5CmluZGV4IDRjMzMyODcuLmRlOGIxYzEgMTAwNjQ0Ci0tLSBhL3NyYy9mcmVlX2NsYXVkZV9jb2RlL21jcC9jbGllbnQucHkKKysrIGIvc3JjL2ZyZWVfY2xhdWRlX2NvZGUvbWNwL2NsaWVudC5weQpAQCAtMjYzLDYgKzI2MywxMCBAQCBjbGFzcyBNQ1BDbGllbnQ6CiAgICAgICAgICAgICBpZiBwcm9jZXNzLnN0ZGVyciBpcyBub3QgTm9uZToKICAgICAgICAgICAgICAgICBwcm9jZXNzLnN0ZGVyci5jbG9zZSgpCiAgICAgICAgIHByb2Nlc3Nlcy5raWxsX3RyZWUocHJvY2VzcykKKyAgICAgICAgIyBSZWFwIGluIGV2ZXJ5IHBhdGg6IGtpbGxfdHJlZSBjYW4gcmV0dXJuIGVhcmx5IHdoZW4gdGhlIGNoaWxkCisgICAgICAgICMgYWxyZWFkeSBleGl0ZWQsIGFuZCB0aGUgV2luZG93cyB0YXNra2lsbCBwYXRoIG5ldmVyIHdhaXRzLgorICAgICAgICB3aXRoIGNvbnRleHRsaWIuc3VwcHJlc3MoRXhjZXB0aW9uKToKKyAgICAgICAgICAgIHByb2Nlc3Mud2FpdCh0aW1lb3V0PTUpCiAgICAgICAgIHByb2Nlc3Nlcy51bnRyYWNrKHByb2Nlc3MpCiAgICAgICAgIHNlbGYuX2F1ZGl0KCJmaW5pc2hlZCIpCiAKLS0gCjIuMzQuMQoK" | base64 -d > /tmp/p.patch
+          git am /tmp/p.patch
+          git fetch origin feat/mcp-client || true
+          git push origin HEAD:feat/mcp-client --force-with-lease
