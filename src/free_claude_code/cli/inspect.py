@@ -24,17 +24,23 @@ from free_claude_code.repo.git import GitError, GitRepo
 from free_claude_code.terminal import (
     SystemInspectError,
     collect_env_context,
+    collect_error_logs,
     collect_listeners,
     collect_processes,
+    collect_services,
     load_run_history,
     render_env_context,
     render_listeners,
     render_processes,
     render_run_summary,
+    render_services,
 )
 
 _DEFAULT_GREP_LIMIT = 100
 _DEFAULT_PROCESS_LIMIT = 50
+_DEFAULT_SERVICE_LIMIT = 50
+_DEFAULT_LOG_LINES = 50
+_MAX_LOG_LINES = 500
 
 
 def _git_section(root: Path) -> dict[str, Any]:
@@ -85,6 +91,26 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
 
     subparsers.add_parser("ports", help="Listening TCP/UDP sockets")
+
+    services_parser = subparsers.add_parser(
+        "services", help="System services (failures first)"
+    )
+    services_parser.add_argument(
+        "--limit",
+        type=int,
+        default=_DEFAULT_SERVICE_LIMIT,
+        help=f"Maximum services shown (default {_DEFAULT_SERVICE_LIMIT})",
+    )
+
+    logs_parser = subparsers.add_parser(
+        "logs", help="Newest system error/warning log lines"
+    )
+    logs_parser.add_argument(
+        "--lines",
+        type=int,
+        default=_DEFAULT_LOG_LINES,
+        help=f"Log lines to fetch (default {_DEFAULT_LOG_LINES}, max {_MAX_LOG_LINES})",
+    )
 
     runs_parser = subparsers.add_parser("runs", help="Recorded run reports")
     runs_parser.add_argument(
@@ -166,6 +192,43 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         else:
             print(render_processes(shown, total=len(processes)))
+        return
+
+    if args.command == "services":
+        try:
+            services = collect_services()
+        except SystemInspectError as exc:
+            print(f"fcc-inspect: {exc}", file=sys.stderr)
+            raise SystemExit(1) from None
+        shown_services = services[: args.limit]
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "services": [
+                            dataclasses.asdict(service) for service in shown_services
+                        ],
+                        "total": len(services),
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(render_services(shown_services, total=len(services)))
+        return
+
+    if args.command == "logs":
+        lines_wanted = min(args.lines, _MAX_LOG_LINES)
+        try:
+            log_lines = collect_error_logs(lines=lines_wanted)
+        except SystemInspectError as exc:
+            print(f"fcc-inspect: {exc}", file=sys.stderr)
+            raise SystemExit(1) from None
+        if args.json:
+            print(json.dumps({"lines": log_lines}, indent=2))
+        else:
+            for line in log_lines:
+                print(line)
         return
 
     if args.command == "ports":

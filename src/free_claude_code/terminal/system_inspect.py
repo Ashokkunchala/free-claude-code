@@ -1,8 +1,9 @@
 """Read-only process and listening-port inspection (roadmap sections 3 and 4).
 
-``fcc-inspect processes`` and ``fcc-inspect ports`` answer "what is running
-on this machine" and "what is accepting connections" without leaving the
-terminal. Each collector shells out to the platform's own read-only tool
+``fcc-inspect processes``, ``ports``, ``services`` and ``logs`` answer
+"what is running on this machine", "what is accepting connections",
+"which services are healthy" and "what went wrong lately" without leaving
+the terminal. Each collector shells out to the platform's own read-only tool
 (``ps``, ``tasklist``, ``ss`` or ``netstat``) through an injectable runner,
 so the parsers stay pure and tests stay hermetic. Process command lines
 routinely carry tokens and passwords, so they pass through the default
@@ -47,6 +48,15 @@ class PortListener:
     address: str
     port: int
     pid: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceInfo:
+    """One system service with a normalized state string."""
+
+    name: str
+    state: str
+    description: str | None
 
 
 def _default_runner(argv: list[str]) -> str:
@@ -248,6 +258,152 @@ def collect_listeners(
     raise SystemInspectError(f"port inspection is not supported on {system}")
 
 
+def parse_systemctl(output: str) -> list[ServiceInfo]:
+    """Parse ``systemctl list-units --type=service --all --no-legend --plain``."""
+
+    services: list[ServiceInfo] = []
+    for line in output.splitlines():
+        fields = line.split(None, 4)
+        if len(fields) < 4:
+            continue
+        name, _load, active, sub = fields[:4]
+        description = fields[4] if len(fields) > 4 else None
+        services.append(
+            ServiceInfo(name=name, state=f"{active}/{sub}", description=description)
+        )
+    return services
+
+
+def parse_launchctl(output: str) -> list[ServiceInfo]:
+    """Parse ``launchctl list`` output (macOS): ``pid\\tstatus\\tlabel``."""
+
+    services: list[ServiceInfo] = []
+    for line in output.splitlines():
+        fields = line.split("\t")
+        if len(fields) < 3 or fields[0] == "PID":
+            continue
+        pid_text, status_text, label = fields[0], fields[1], fields[2]
+        if pid_text != "-" and pid_text.isdigit():
+            state = "running"
+        elif status_text.lstrip("-").isdigit():
+            state = f"stopped (exit {status_text})"
+        else:
+            state = "stopped"
+        services.append(ServiceInfo(name=label, state=state, description=None))
+    return services
+
+
+def parse_sc_query(output: str) -> list[ServiceInfo]:
+    """Parse ``sc query type= service state= all`` output (Windows)."""
+
+    services: list[ServiceInfo] = []
+    name: str | None = None
+    display: str | None = None
+    state: str | None = None
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("SERVICE_NAME:"):
+            if name is not None:
+                services.append(
+                    ServiceInfo(
+                        name=name, state=state or "unknown", description=display
+                    )
+                )
+            name = stripped.split(":", 1)[1].strip()
+            display = None
+            state = None
+        elif stripped.startswith("DISPLAY_NAME:"):
+            display = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("STATE"):
+            tail = stripped.split(":", 1)[1].split()
+            if len(tail) >= 2:
+                state = tail[1].lower()
+    if name is not None:
+        services.append(
+            ServiceInfo(name=name, state=state or "unknown", description=display)
+        )
+    return services
+
+
+def collect_services(
+    *,
+    runner: CommandRunner | None = None,
+    system: str | None = None,
+) -> list[ServiceInfo]:
+    """Collect system services with normalized states."""
+
+    run = runner if runner is not None else _default_runner
+    system = system if system is not None else platform.system()
+    if system == "Linux":
+        return parse_systemctl(
+            run(
+                [
+                    "systemctl",
+                    "list-units",
+                    "--type=service",
+                    "--all",
+                    "--no-pager",
+                    "--no-legend",
+                    "--plain",
+                ]
+            )
+        )
+    if system == "Darwin":
+        return parse_launchctl(run(["launchctl", "list"]))
+    if system == "Windows":
+        return parse_sc_query(run(["sc", "query", "type=", "service", "state=", "all"]))
+    raise SystemInspectError(f"service inspection is not supported on {system}")
+
+
+def collect_error_logs(
+    *,
+    runner: CommandRunner | None = None,
+    system: str | None = None,
+    lines: int = 50,
+) -> list[str]:
+    """Collect the newest system error/warning log lines, secret-redacted.
+
+    Linux reads the systemd journal (warnings and above); Windows reads the
+    System event log. macOS has no bounded equivalent here, so it degrades
+    to a clear error.
+    """
+
+    run = runner if runner is not None else _default_runner
+    system = system if system is not None else platform.system()
+    if system == "Linux":
+        output = run(["journalctl", "-n", str(lines), "-p", "warning", "--no-pager"])
+    elif system == "Windows":
+        output = run(["wevtutil", "qe", "System", f"/c:{lines}", "/rd:true", "/f:text"])
+    else:
+        raise SystemInspectError(f"log inspection is not supported on {system}")
+    redactor = default_redactor()
+    return [
+        redactor.redact_text(line)
+        for line in output.splitlines()
+        if line.strip() and not line.startswith("-- Logs begin")
+    ]
+
+
+def render_services(services: Sequence[ServiceInfo], *, total: int) -> str:
+    """Human-readable service table, failures first."""
+
+    def rank(service: ServiceInfo) -> tuple[int, str]:
+        if service.state.startswith("failed"):
+            return (0, service.name)
+        if service.state in ("running", "active/running", "active/exited"):
+            return (1, service.name)
+        return (2, service.name)
+
+    ordered = sorted(services, key=rank)
+    lines = []
+    for service in ordered:
+        description = f"  {service.description}" if service.description else ""
+        lines.append(f"{service.state:<16} {service.name}{description}")
+    if total > len(services):
+        lines.append(f"... {total - len(services)} more (raise --limit)")
+    return "\n".join(lines)
+
+
 def render_processes(processes: Sequence[ProcessInfo], *, total: int) -> str:
     """Human-readable process table."""
 
@@ -285,14 +441,21 @@ __all__ = [
     "CommandRunner",
     "PortListener",
     "ProcessInfo",
+    "ServiceInfo",
     "SystemInspectError",
+    "collect_error_logs",
     "collect_listeners",
     "collect_processes",
+    "collect_services",
+    "parse_launchctl",
     "parse_netstat_macos",
     "parse_netstat_windows",
     "parse_ps",
+    "parse_sc_query",
     "parse_ss",
+    "parse_systemctl",
     "parse_tasklist",
     "render_listeners",
     "render_processes",
+    "render_services",
 ]

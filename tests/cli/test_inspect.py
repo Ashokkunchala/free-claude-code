@@ -277,3 +277,85 @@ def test_ports_json(workspace: Path, capsys, monkeypatch) -> None:
     assert payload[0]["port"] == 8000
     assert payload[0]["pid"] == 200
     assert payload[1]["port"] == 53
+
+
+def _fake_services() -> list:
+    from free_claude_code.terminal import ServiceInfo
+
+    return [
+        ServiceInfo(name="ok.service", state="active/running", description="fine"),
+        ServiceInfo(name="bad.service", state="failed/failed", description="broken"),
+        ServiceInfo(name="idle.service", state="inactive/dead", description=None),
+    ]
+
+
+def test_services_plain_failed_first(workspace: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "free_claude_code.cli.inspect.collect_services", lambda: _fake_services()
+    )
+    run(["--workspace", str(workspace), "services"])
+    out = capsys.readouterr().out
+    assert (
+        out.index("bad.service") < out.index("ok.service") < out.index("idle.service")
+    )
+    assert "failed/failed" in out
+
+
+def test_services_json_and_limit(workspace: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "free_claude_code.cli.inspect.collect_services", lambda: _fake_services()
+    )
+    run(["--workspace", str(workspace), "--json", "services", "--limit", "2"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["total"] == 3
+    assert len(payload["services"]) == 2
+    assert payload["services"][0]["state"] == "active/running"
+
+
+def test_services_tool_missing_fails(workspace: Path, capsys, monkeypatch) -> None:
+    from free_claude_code.terminal import SystemInspectError
+
+    def boom():
+        raise SystemInspectError("'systemctl' is not installed on this system")
+
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_services", boom)
+    with pytest.raises(SystemExit):
+        run(["--workspace", str(workspace), "services"])
+    assert "not installed" in capsys.readouterr().err
+
+
+def test_logs_plain(workspace: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "free_claude_code.cli.inspect.collect_error_logs",
+        lambda lines=50: ["line one", "line two"],
+    )
+    run(["--workspace", str(workspace), "logs"])
+    out = capsys.readouterr().out
+    assert "line one" in out
+    assert "line two" in out
+
+
+def test_logs_json_and_cap(workspace: Path, capsys, monkeypatch) -> None:
+    seen = {}
+
+    def fake_collect(lines=50):
+        seen["lines"] = lines
+        return ["entry"]
+
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_error_logs", fake_collect)
+    run(["--workspace", str(workspace), "--json", "logs", "--lines", "9999"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"lines": ["entry"]}
+    assert seen["lines"] == 500
+
+
+def test_logs_unsupported_platform_fails(workspace: Path, capsys, monkeypatch) -> None:
+    from free_claude_code.terminal import SystemInspectError
+
+    def boom(lines=50):
+        raise SystemInspectError("log inspection is not supported on Darwin")
+
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_error_logs", boom)
+    with pytest.raises(SystemExit):
+        run(["--workspace", str(workspace), "logs"])
+    assert "not supported" in capsys.readouterr().err

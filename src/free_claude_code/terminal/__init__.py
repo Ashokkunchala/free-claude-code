@@ -78,11 +78,15 @@ from free_claude_code.terminal.spec import (
 from free_claude_code.terminal.system_inspect import (
     PortListener,
     ProcessInfo,
+    ServiceInfo,
     SystemInspectError,
+    collect_error_logs,
     collect_listeners,
     collect_processes,
+    collect_services,
     render_listeners,
     render_processes,
+    render_services,
 )
 
 __all__ = [
@@ -121,6 +125,7 @@ __all__ = [
     "RunStep",
     "SchedulerConfig",
     "SchedulerStats",
+    "ServiceInfo",
     "SpawnError",
     "StepReport",
     "SystemInspectError",
@@ -131,8 +136,10 @@ __all__ = [
     "build_plan_prompt",
     "build_repair_prompt",
     "collect_env_context",
+    "collect_error_logs",
     "collect_listeners",
     "collect_processes",
+    "collect_services",
     "command_fingerprint",
     "extract_plan_json",
     "load_run_history",
@@ -145,4 +152,5 @@ __all__ = [
     "render_listeners",
     "render_processes",
     "render_run_summary",
+    "render_services",
 ]
