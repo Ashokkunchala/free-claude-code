@@ -131,6 +131,7 @@ def propose_plan_with_feedback(
     model: Callable[[str], str],
     *,
     workspace: str | None = None,
+    context: str | None = None,
     attempts: int = 2,
 ) -> RunPlan:
     """propose_plan with one correction round when the response is not a plan."""
@@ -145,7 +146,9 @@ def propose_plan_with_feedback(
                 "Answer with ONE JSON plan object and nothing else."
             )
         try:
-            return propose_plan(prompt_task, model, workspace=workspace)
+            return propose_plan(
+                prompt_task, model, workspace=workspace, context=context
+            )
         except PlanError as exc:
             last_error = exc
     assert last_error is not None

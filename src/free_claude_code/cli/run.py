@@ -31,9 +31,11 @@ from free_claude_code.terminal import (
     RunPlan,
     RunReport,
     build_plan_prompt,
+    collect_env_context,
     plan_from_response,
     plan_model_from_env,
     propose_plan_with_feedback,
+    render_env_context,
 )
 from free_claude_code.terminal.approval import ApprovalTokenIssuer
 from free_claude_code.terminal.policy import PolicyConfig, PolicyEngine
@@ -81,6 +83,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         metavar="TASK",
         default=None,
         help="Generate a plan for TASK with the FCC_PLAN_* model and run it",
+    )
+    parser.add_argument(
+        "--no-context",
+        action="store_true",
+        help="Do not attach observed workspace context to the plan prompt",
     )
     parser.add_argument(
         "--model-attempts",
@@ -189,11 +196,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         except PlanModelError as exc:
             print(f"fcc-run: {exc}", file=sys.stderr)
             raise SystemExit(EXIT_ERROR) from None
+        context = None
+        if not args.no_context:
+            context = render_env_context(collect_env_context(str(workspace)))
         try:
             plan = propose_plan_with_feedback(
                 args.task,
                 model,
                 workspace=str(workspace),
+                context=context,
                 attempts=args.model_attempts,
             )
         except PlanModelError as exc:
