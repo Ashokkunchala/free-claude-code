@@ -25,6 +25,21 @@ def command(args: list[str], *, cwd: Path | None = None) -> str:
     ).stdout
 
 
+def tag_refs() -> str:
+    result = subprocess.run(
+        ["git", "show-ref", "--tags", "--dereference"],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    # show-ref exits 1 when no refs match, e.g. a repository with no tags.
+    if result.returncode == 1 and not result.stdout:
+        return ""
+    result.check_returncode()
+    return result.stdout
+
+
 def distribution_names(version: str) -> tuple[str, str]:
     stem = f"free_claude_code-{version}"
     return f"{stem}-py3-none-any.whl", f"{stem}.tar.gz"
@@ -74,11 +89,14 @@ class Publisher:
 
         tags = {}
         # Peeled annotated-tag entries follow their unpeeled entries.
-        for line in git("show-ref", "--tags", "--dereference").splitlines():
+        for line in tag_refs().splitlines():
             sha, ref = line.split()
             name = ref.removeprefix("refs/tags/").removesuffix("^{}")
             if name.startswith("v") and VERSION.fullmatch(name[1:]):
                 tags[name] = sha
+        if not tags:
+            print(f"No release tags found; skipping release for {target}")
+            return
         previous = None
         for sha in history[history.index(target) + 1 :]:
             names = [name for name, commit in tags.items() if commit == sha]
