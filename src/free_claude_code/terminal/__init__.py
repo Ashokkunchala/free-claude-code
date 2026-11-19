@@ -75,6 +75,15 @@ from free_claude_code.terminal.spec import (
     CommandSpec,
     PolicyDecision,
 )
+from free_claude_code.terminal.system_inspect import (
+    PortListener,
+    ProcessInfo,
+    SystemInspectError,
+    collect_listeners,
+    collect_processes,
+    render_listeners,
+    render_processes,
+)
 
 __all__ = [
     "DEFAULT_POLICY_DECISION",
@@ -100,6 +109,8 @@ __all__ = [
     "PolicyEngine",
     "PolicyRejectedError",
     "PolicyVerdict",
+    "PortListener",
+    "ProcessInfo",
     "QueueFullError",
     "Redactor",
     "Requirement",
@@ -112,6 +123,7 @@ __all__ = [
     "SchedulerStats",
     "SpawnError",
     "StepReport",
+    "SystemInspectError",
     "TerminalExecutor",
     "TerminalExecutorError",
     "VerifySpec",
@@ -119,6 +131,8 @@ __all__ = [
     "build_plan_prompt",
     "build_repair_prompt",
     "collect_env_context",
+    "collect_listeners",
+    "collect_processes",
     "command_fingerprint",
     "extract_plan_json",
     "load_run_history",
@@ -128,5 +142,7 @@ __all__ = [
     "propose_plan_with_feedback",
     "propose_repair",
     "render_env_context",
+    "render_listeners",
+    "render_processes",
     "render_run_summary",
 ]

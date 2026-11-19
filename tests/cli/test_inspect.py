@@ -191,3 +191,89 @@ def test_runs_unknown_task(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as exc:
         run(["runs", "nope", "--runs-dir", str(tmp_path / "runs")])
     assert exc.value.code == 1
+
+
+def _fake_processes() -> list:
+    from free_claude_code.terminal import ProcessInfo
+
+    return [
+        ProcessInfo(
+            pid=100,
+            ppid=1,
+            rss_bytes=10 * 1024 * 1024,
+            name="small",
+            command="small --run",
+        ),
+        ProcessInfo(
+            pid=200, ppid=1, rss_bytes=99 * 1024 * 1024, name="big", command="big --run"
+        ),
+        ProcessInfo(
+            pid=300, ppid=None, rss_bytes=None, name="kernel", command="kernel"
+        ),
+    ]
+
+
+def _fake_listeners() -> list:
+    from free_claude_code.terminal import PortListener
+
+    return [
+        PortListener(protocol="udp", address="0.0.0.0", port=53, pid=None),
+        PortListener(protocol="tcp", address="127.0.0.1", port=8000, pid=200),
+    ]
+
+
+def test_processes_plain_sorted_by_rss(workspace: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "free_claude_code.cli.inspect.collect_processes", lambda: _fake_processes()
+    )
+    run(["--workspace", str(workspace), "processes"])
+    out = capsys.readouterr().out
+    assert out.index("big") < out.index("small") < out.index("kernel")
+    assert "99.0MB" in out
+
+
+def test_processes_json_and_limit(workspace: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "free_claude_code.cli.inspect.collect_processes", lambda: _fake_processes()
+    )
+    run(["--workspace", str(workspace), "--json", "processes", "--limit", "1"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["total"] == 3
+    assert len(payload["processes"]) == 1
+    assert payload["processes"][0]["name"] == "big"
+
+
+def test_processes_tool_missing_fails(workspace: Path, capsys, monkeypatch) -> None:
+    from free_claude_code.terminal import SystemInspectError
+
+    def boom():
+        raise SystemInspectError("'ps' is not installed on this system")
+
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_processes", boom)
+    with pytest.raises(SystemExit):
+        run(["--workspace", str(workspace), "processes"])
+    assert "not installed" in capsys.readouterr().err
+
+
+def test_ports_plain(workspace: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "free_claude_code.cli.inspect.collect_listeners", lambda: _fake_listeners()
+    )
+    run(["--workspace", str(workspace), "ports"])
+    out = capsys.readouterr().out
+    assert "tcp" in out
+    assert "127.0.0.1:8000" in out
+    assert "pid 200" in out
+    # sorted by (protocol, port): tcp line precedes udp line
+    assert out.index("tcp") < out.index("udp")
+
+
+def test_ports_json(workspace: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "free_claude_code.cli.inspect.collect_listeners", lambda: _fake_listeners()
+    )
+    run(["--workspace", str(workspace), "--json", "ports"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload[0]["port"] == 8000
+    assert payload[0]["pid"] == 200
+    assert payload[1]["port"] == 53
