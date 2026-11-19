@@ -13,7 +13,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from free_claude_code.mcp import MCPServer, MCPState, evaluate_server
+from free_claude_code.mcp import (
+    MCPClient,
+    MCPError,
+    MCPServer,
+    MCPState,
+    evaluate_server,
+    probe_server,
+)
 from free_claude_code.mcp.config import load_config
 from free_claude_code.mcp.state import default_config_path, default_state_path
 
@@ -110,6 +117,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     for verb in ("enable", "disable"):
         toggle = subparsers.add_parser(verb, help=f"{verb.capitalize()} one server")
         toggle.add_argument("name")
+    probe_parser = subparsers.add_parser(
+        "probe", help="Health-check one server (starts it, then disconnects)"
+    )
+    probe_parser.add_argument("name")
+    tools_parser = subparsers.add_parser(
+        "tools", help="List one server's advertised tools (starts it)"
+    )
+    tools_parser.add_argument("name")
 
     args = parser.parse_args(argv)
     config_path = (args.config or default_config_path()).resolve()
@@ -151,6 +166,61 @@ def main(argv: Sequence[str] | None = None) -> None:
             sys.exit(2)
         if args.command == "inspect":
             _inspect(server, state, as_json=args.json)
+        elif args.command == "probe":
+            report = probe_server(server, state)
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "name": report.server,
+                            "ok": report.ok,
+                            "reason": report.reason,
+                            "tools": list(report.tools),
+                            "duration_seconds": report.duration_seconds,
+                            "policy_id": report.policy_id,
+                        },
+                        indent=2,
+                    )
+                )
+            else:
+                status = "ok" if report.ok else "FAIL"
+                print(f"{report.server}: {status} - {report.reason}")
+                if report.tools:
+                    print(f"  tools: {', '.join(report.tools)}")
+            sys.exit(0 if report.ok else 1)
+        elif args.command == "tools":
+            verdict = evaluate_server(server, state)
+            if not verdict.allowed:
+                print(verdict.reason, file=sys.stderr)
+                sys.exit(1)
+            client = MCPClient(server)
+            try:
+                client.start()
+                tools = client.list_tools()
+            except MCPError as exc:
+                print(f"{server.name}: {exc}", file=sys.stderr)
+                sys.exit(1)
+            finally:
+                client.close()
+            if args.json:
+                print(
+                    json.dumps(
+                        {
+                            "tools": [
+                                {"name": tool.name, "description": tool.description}
+                                for tool in tools
+                            ]
+                        },
+                        indent=2,
+                    )
+                )
+            elif not tools:
+                print(f"{server.name}: no tools")
+            else:
+                for tool in tools:
+                    print(tool.name)
+                    if tool.description:
+                        print(f"  {tool.description}")
         else:
             enabled = args.command == "enable"
             state.set_enabled(server.name, enabled)
