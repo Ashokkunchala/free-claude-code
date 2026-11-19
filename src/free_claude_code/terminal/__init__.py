@@ -31,6 +31,12 @@ from free_claude_code.terminal.policy import (
 )
 from free_claude_code.terminal.redaction import Redactor
 from free_claude_code.terminal.result import CommandResult, OutputChunk
+from free_claude_code.terminal.scheduler import (
+    CommandScheduler,
+    QueueFullError,
+    SchedulerConfig,
+    SchedulerStats,
+)
 from free_claude_code.terminal.spec import (
     DEFAULT_POLICY_DECISION,
     CommandSpec,
@@ -45,6 +51,7 @@ __all__ = [
     "AuditEvent",
     "AuditSink",
     "CommandResult",
+    "CommandScheduler",
     "CommandSpec",
     "FileApprovalStore",
     "InMemoryAuditSink",
@@ -56,9 +63,12 @@ __all__ = [
     "PolicyEngine",
     "PolicyRejectedError",
     "PolicyVerdict",
+    "QueueFullError",
     "Redactor",
     "Requirement",
     "RiskLevel",
+    "SchedulerConfig",
+    "SchedulerStats",
     "SpawnError",
     "TerminalExecutor",
     "TerminalExecutorError",
