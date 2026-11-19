@@ -1,8 +1,10 @@
 """Audit events for terminal command execution.
 
 Every command emits structured events through an ``AuditSink``: planned,
-started, finished, and (when applicable) timed_out or cancelled. Sinks never
-see raw output - only metadata - so audit files stay shareable.
+started, finished (or failed on a non-zero exit or spawn error), and (when
+applicable) timed_out or cancelled. Approval surfaces record approved or
+denied decisions through :func:`record_decision`. Sinks never see raw
+output - only metadata - so audit files stay shareable.
 """
 
 import json
@@ -101,6 +103,28 @@ def make_event(
         duration_seconds=duration_seconds,
         exit_code=exit_code,
         policy_id=policy_id,
+    )
+
+
+def record_decision(
+    sink: AuditSink,
+    *,
+    granted: bool,
+    task_id: str,
+    argv: tuple[str, ...],
+    cwd: str | None,
+    policy_id: str | None = None,
+) -> None:
+    """Record an approval decision: ``approved`` when granted, else ``denied``."""
+
+    sink.record(
+        make_event(
+            "approved" if granted else "denied",
+            task_id,
+            argv,
+            cwd,
+            policy_id=policy_id,
+        )
     )
 
 
