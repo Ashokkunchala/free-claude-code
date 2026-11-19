@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 import uvicorn
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from e2e.code_support import CodeControl
 from e2e.server_shutdown import join_server
@@ -363,6 +363,15 @@ def admin_base_url(
 
 
 @pytest.fixture(autouse=True)
+def expect_ready_timeout() -> Iterator[None]:
+    # The 5s expect default is not enough for the admin UI to reach the
+    # asserted state on loaded Windows CI runners. Assertions are unchanged;
+    # they only get longer to become true.
+    expect.set_options(timeout=15_000)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def close_browser_connections_before_server_teardown(
     admin_base_url: str,
     page: Page,
@@ -370,4 +379,9 @@ def close_browser_connections_before_server_teardown(
     del admin_base_url
     yield
     if not page.is_closed():
+        # Drop route handlers before closing anything: an in-flight request
+        # hitting a disposed route callback fails teardown with
+        # TargetClosedError (observed on Windows CI).
+        page.unroute_all(behavior="ignoreErrors")
+        page.context.unroute_all(behavior="ignoreErrors")
         page.goto("about:blank")
