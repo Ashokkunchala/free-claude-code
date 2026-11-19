@@ -95,3 +95,10 @@ def skills(argv: Sequence[str] | None = None) -> None:
     from free_claude_code.cli.skills import main
 
     main(argv)
+
+
+def mcp(argv: Sequence[str] | None = None) -> None:
+    """Manage configured MCP servers (registered as ``fcc-mcp``)."""
+    from free_claude_code.cli.mcp import main
+
+    main(argv)
