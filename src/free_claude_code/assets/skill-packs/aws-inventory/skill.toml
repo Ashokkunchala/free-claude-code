@@ -1,0 +1,23 @@
+name = "aws-inventory"
+version = "0.1.0"
+purpose = "Read-only AWS inventory and diagnostics across IAM, networking, DNS, TLS, load balancers, storage and secret references"
+platforms = ["linux", "macos", "windows"]
+required_tools = ["aws"]
+max_risk = "r0"
+approval_from = "r2"
+timeout_seconds = 600
+rollback = "Read-only inventory only; no rollback applies"
+verification = ["Active profile and region reported with every finding", "Every resource claim cites the aws CLI call and its output"]
+executable = false
+
+[[tools]]
+name = "account-overview"
+description = "Summarize the caller identity, enabled regions and service reachability for the active credentials"
+timeout_seconds = 180
+max_output_bytes = 262144
+
+[[tools]]
+name = "resource-evidence"
+description = "Capture describe output for one resource family (instances, buckets, load balancers, hosted zones, certificates) as diagnostic evidence"
+timeout_seconds = 180
+max_output_bytes = 524288

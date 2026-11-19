@@ -1,0 +1,23 @@
+name = "log-correlation"
+version = "0.1.0"
+purpose = "Correlate logs across services in a time window to build incident timelines and find first-failure evidence"
+platforms = ["linux", "macos", "windows"]
+required_tools = []
+max_risk = "r0"
+approval_from = "r2"
+timeout_seconds = 600
+rollback = "Log analysis is read-only; no rollback applies"
+verification = ["Time window and sources stated", "Timeline entries cite source, timestamp and line excerpt"]
+executable = false
+
+[[tools]]
+name = "window-scan"
+description = "Scan one or more log sources in a time window for errors, warnings and state transitions"
+timeout_seconds = 300
+max_output_bytes = 524288
+
+[[tools]]
+name = "incident-timeline"
+description = "Merge timestamped events from multiple sources into one ordered incident timeline with the first failure highlighted"
+timeout_seconds = 300
+max_output_bytes = 524288

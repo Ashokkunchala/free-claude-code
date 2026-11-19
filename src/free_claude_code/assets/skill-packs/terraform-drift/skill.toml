@@ -1,0 +1,23 @@
+name = "terraform-drift"
+version = "0.1.0"
+purpose = "Terraform and OpenTofu plan review, state inspection, drift detection and policy checks"
+platforms = ["linux", "macos", "windows"]
+required_tools = ["terraform"]
+max_risk = "r1"
+approval_from = "r2"
+timeout_seconds = 900
+rollback = "Plan and state inspection are read-only; never apply from this skill"
+verification = ["terraform version and workspace reported", "Drift findings cite resource addresses from plan or state output"]
+executable = false
+
+[[tools]]
+name = "plan-summary"
+description = "Run terraform plan in read-only mode and summarize creates, updates, destroys and replacements by resource address"
+timeout_seconds = 600
+max_output_bytes = 524288
+
+[[tools]]
+name = "state-inventory"
+description = "List state resources and highlight drift between configuration, state and provider reality"
+timeout_seconds = 300
+max_output_bytes = 524288
