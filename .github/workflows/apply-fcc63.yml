@@ -2,6 +2,7 @@ name: Apply patch fcc63
 
 permissions:
   contents: write
+  workflows: write
 
 on:
   push:
