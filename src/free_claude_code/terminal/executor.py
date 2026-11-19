@@ -80,6 +80,8 @@ class TerminalExecutor:
                 env=spec.env,
                 inherit_stdio=spec.inherit_stdio,
                 isolated=spec.isolated,
+                max_cpu_seconds=spec.max_cpu_seconds,
+                max_memory_bytes=spec.max_memory_bytes,
             )
         except (OSError, ValueError) as exc:
             self._sink.record(
