@@ -35,9 +35,9 @@ from free_claude_code.terminal.audit import (
 )
 from free_claude_code.terminal.executor import TerminalExecutor
 from free_claude_code.terminal.policy import (
-    PolicyConfig,
     PolicyEngine,
     Requirement,
+    policy_config_from_env,
 )
 from free_claude_code.terminal.result import CommandResult
 from free_claude_code.terminal.spec import CommandSpec
@@ -239,7 +239,7 @@ class RunEngine:
         self._engine = (
             engine
             if engine is not None
-            else PolicyEngine(PolicyConfig(workspace_root=workspace))
+            else PolicyEngine(policy_config_from_env(workspace_root=workspace))
         )
         self._store = store
         self._issuer = issuer
