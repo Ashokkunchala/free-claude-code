@@ -147,7 +147,7 @@ def test_task_generates_and_runs_plan(capsys, tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
 
-    def fake_propose(task, model, *, workspace, context, attempts):
+    def fake_propose(task, model, *, workspace, context, skills, attempts):
         assert task == "say hi"
         assert context is not None and "Platform:" in context
         return run_cli.RunPlan.from_dict(
@@ -182,7 +182,7 @@ def test_task_rejects_junk_model_response(capsys, tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
 
-    def junk(task, model, *, workspace, context, attempts):
+    def junk(task, model, *, workspace, context, skills, attempts):
         raise run_cli.PlanError("model response is not valid JSON")
 
     monkeypatch.setattr(run_cli, "propose_plan_with_feedback", junk)
@@ -206,7 +206,7 @@ def test_task_no_context_passes_none(capsys, tmp_path, monkeypatch):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
 
-    def fake_propose(task, model, *, workspace, context, attempts):
+    def fake_propose(task, model, *, workspace, context, skills, attempts):
         assert context is None
         return run_cli.RunPlan.from_dict(
             {
@@ -230,7 +230,7 @@ def test_task_repair_loop_recovers(capsys, tmp_path, monkeypatch):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
 
-    def fake_propose(task, model, *, workspace, context, attempts):
+    def fake_propose(task, model, *, workspace, context, skills, attempts):
         return run_cli.RunPlan.from_dict(
             {
                 "goal": "g",
@@ -238,7 +238,7 @@ def test_task_repair_loop_recovers(capsys, tmp_path, monkeypatch):
             }
         )
 
-    def fake_repair(task, report, model, *, workspace, context, attempts):
+    def fake_repair(task, report, model, *, workspace, context, skills, attempts):
         assert report.status == "failed"
         return run_cli.RunPlan.from_dict(
             {
@@ -267,7 +267,7 @@ def test_task_without_repair_attempts_stays_failed(capsys, tmp_path, monkeypatch
 
     monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
 
-    def fake_propose(task, model, *, workspace, context, attempts):
+    def fake_propose(task, model, *, workspace, context, skills, attempts):
         return run_cli.RunPlan.from_dict(
             {"goal": "g", "steps": [{"id": "s1", "title": "bad", "argv": ["false"]}]}
         )
@@ -312,12 +312,12 @@ def test_repair_loop_records_each_attempt(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
 
-    def fake_propose(task, model, *, workspace, context, attempts):
+    def fake_propose(task, model, *, workspace, context, skills, attempts):
         return run_cli.RunPlan.from_dict(
             {"goal": "g", "steps": [{"id": "s1", "title": "bad", "argv": ["false"]}]}
         )
 
-    def fake_repair(task, report, model, *, workspace, context, attempts):
+    def fake_repair(task, report, model, *, workspace, context, skills, attempts):
         return run_cli.RunPlan.from_dict(
             {
                 "goal": "g",
@@ -374,3 +374,85 @@ def test_history_prints_recorded_run(capsys, tmp_path):
 def test_history_unknown_task_fails(capsys, tmp_path):
     code = invoke(["--history", "nope", "--runs-dir", str(tmp_path / "runs")])
     assert code == 1
+
+
+_PACK_MANIFEST = """
+name = "{name}"
+version = "0.1.0"
+purpose = "Test pack"
+platforms = ["linux"]
+max_risk = "r0"
+executable = false
+"""
+
+
+def _write_pack(root, name, instructions):
+    pack = root / name
+    pack.mkdir(parents=True)
+    (pack / "skill.toml").write_text(_PACK_MANIFEST.format(name=name), encoding="utf-8")
+    (pack / "SKILL.md").write_text(instructions, encoding="utf-8")
+    return pack
+
+
+def test_task_attaches_skill_guidance(capsys, tmp_path, monkeypatch):
+    import subprocess
+
+    from free_claude_code.cli import run as run_cli
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
+    packs_dir = tmp_path / "packs"
+    _write_pack(packs_dir, "docker-triage", "Run docker ps first.")
+    captured = {}
+
+    def fake_propose(task, model, *, workspace, context, skills, attempts):
+        captured["skills"] = skills
+        return run_cli.RunPlan.from_dict(
+            {
+                "goal": "triage",
+                "steps": [{"id": "s1", "title": "t", "argv": ["git", "status"]}],
+            }
+        )
+
+    monkeypatch.setattr(run_cli, "propose_plan_with_feedback", fake_propose)
+    code = invoke(
+        [
+            "--task",
+            "triage",
+            "--packs",
+            str(packs_dir),
+            "--skills-state",
+            str(tmp_path / "skills-state.json"),
+            *base_args(tmp_path, tmp_path / "x")[1:],
+        ]
+    )
+    assert code == 0
+    assert captured["skills"] is not None
+    assert "docker-triage" in captured["skills"]
+    assert "Run docker ps first." in captured["skills"]
+
+
+def test_task_no_skills_passes_none(capsys, tmp_path, monkeypatch):
+    import subprocess
+
+    from free_claude_code.cli import run as run_cli
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    monkeypatch.setattr(run_cli, "plan_model_from_env", lambda: object())
+    captured = {}
+
+    def fake_propose(task, model, *, workspace, context, skills, attempts):
+        captured["skills"] = skills
+        return run_cli.RunPlan.from_dict(
+            {
+                "goal": "g",
+                "steps": [{"id": "s1", "title": "t", "argv": ["git", "status"]}],
+            }
+        )
+
+    monkeypatch.setattr(run_cli, "propose_plan_with_feedback", fake_propose)
+    code = invoke(
+        ["--task", "g", "--no-skills", *base_args(tmp_path, tmp_path / "x")[1:]]
+    )
+    assert code == 0
+    assert captured["skills"] is None
