@@ -20,7 +20,8 @@ from typing import Protocol
 class AuditEvent:
     """One command-lifecycle event."""
 
-    kind: str  # planned | started | finished | timed_out | cancelled
+    kind: str  # planned | started | finished | failed | timed_out | cancelled
+    # | approved | denied | verified | verification_failed
     task_id: str
     argv: tuple[str, ...]
     cwd: str | None
