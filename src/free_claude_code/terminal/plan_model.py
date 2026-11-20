@@ -7,11 +7,13 @@ library so the terminal package keeps its zero-dependency contract, and
 it never puts credentials into error messages.
 """
 
+import email.utils
 import json
 import os
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 
 from free_claude_code.terminal.plan_gen import (
     build_repair_prompt,
@@ -36,6 +38,38 @@ class PlanModelError(Exception):
     """The model endpoint could not supply a usable response."""
 
 
+class PlanModelRateLimitError(PlanModelError):
+    """The endpoint refused the call: rate limit or quota exhausted.
+
+    Roadmap section 9: quota and rate-limit behavior is exposed honestly.
+    Carries the provider's Retry-After hint in seconds when it sent one, so
+    the operator sees a real backoff instead of a generic HTTP error.
+    """
+
+    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Seconds from a Retry-After header: integer delay or HTTP date."""
+
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            when = email.utils.parsedate_to_datetime(value)
+        except TypeError, ValueError:
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        seconds = (when - datetime.now(UTC)).total_seconds()
+    return max(0.0, seconds)
+
+
 def _urllib_transport(
     url: str, payload: dict, headers: dict[str, str], timeout: float
 ) -> dict:
@@ -50,7 +84,24 @@ def _urllib_transport(
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        excerpt = exc.read(512).decode("utf-8", errors="replace")
+        # Python 3.14: HTTPError is a tempfile-backed response wrapper whose
+        # __del__ warns when it is garbage-collected unclosed; close it.
+        try:
+            excerpt = exc.read(512).decode("utf-8", errors="replace")
+        finally:
+            exc.close()
+        if exc.code == 429:
+            retry_after = _parse_retry_after(exc.headers.get("Retry-After"))
+            hint = (
+                f"; the provider asks for a ~{retry_after:.0f}s backoff"
+                if retry_after is not None
+                else "; the provider gave no retry hint"
+            )
+            raise PlanModelRateLimitError(
+                "plan model endpoint rate limited or out of quota (HTTP 429)"
+                f"{hint}: {excerpt.strip()}",
+                retry_after=retry_after,
+            ) from None
         raise PlanModelError(
             f"plan model endpoint returned HTTP {exc.code}: {excerpt.strip()}"
         ) from None
@@ -115,14 +166,26 @@ class FallbackPlanModel:
 
     def __call__(self, prompt: str) -> str:
         failures: list[str] = []
+        every_leg_rate_limited = True
+        retry_hints: list[float] = []
         for label, model in self._legs:
             try:
                 return model(prompt)
             except PlanModelError as exc:
                 failures.append(f"{label}: {exc}")
-        raise PlanModelError(
-            "all plan models failed -> " + " | ".join(failures)
-        ) from None
+                if isinstance(exc, PlanModelRateLimitError):
+                    if exc.retry_after is not None:
+                        retry_hints.append(exc.retry_after)
+                else:
+                    every_leg_rate_limited = False
+        message = "all plan models failed -> " + " | ".join(failures)
+        if every_leg_rate_limited:
+            # Every leg is throttled: say so, with the earliest honest backoff.
+            raise PlanModelRateLimitError(
+                message,
+                retry_after=min(retry_hints) if retry_hints else None,
+            ) from None
+        raise PlanModelError(message) from None
 
 
 def _parse_fallbacks(raw: str) -> list[tuple[str, str, str | None]]:
