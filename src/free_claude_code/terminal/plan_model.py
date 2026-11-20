@@ -84,7 +84,12 @@ def _urllib_transport(
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        excerpt = exc.read(512).decode("utf-8", errors="replace")
+        # Python 3.14: HTTPError is a tempfile-backed response wrapper whose
+        # __del__ warns when it is garbage-collected unclosed; close it.
+        try:
+            excerpt = exc.read(512).decode("utf-8", errors="replace")
+        finally:
+            exc.close()
         if exc.code == 429:
             retry_after = _parse_retry_after(exc.headers.get("Retry-After"))
             hint = (
