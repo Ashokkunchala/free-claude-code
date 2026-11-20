@@ -5,8 +5,10 @@ model-agnostic. A run is a ``RunPlan`` - an ordered list of steps, each a
 command plus an optional verification command - and the engine walks it
 through the roadmap lifecycle: policy-check every step, require a bound
 approval token for R2/R3 commands, execute through the terminal executor,
-verify postconditions, stop safely on the first failure, and report what
-ran, what was decided and what remains. Nothing here talks to a model:
+verify postconditions, stop safely on the first failure, roll completed
+steps back when their plan-provided rollback command is authorized
+(roadmap stage 8: recover), and report what ran, what was decided and
+what remains. Nothing here talks to a model:
 plans arrive as data (today: a JSON file via ``fcc-run``; a later slice
 adds model-generated plans against this same schema). This keeps the
 safety semantics - policy, approvals, verification, audit - deterministic
@@ -14,7 +16,7 @@ and testable before any model is asked to produce a plan.
 """
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from free_claude_code.terminal.approval import ApprovalTokenIssuer
@@ -53,25 +55,29 @@ class PlanError(ValueError):
 
 @dataclass(frozen=True)
 class VerifySpec:
-    """Postcondition check for one step: run argv, expect an exit code."""
+    """Postcondition check for one step: run argv, expect an exit code.
+
+    Also parses ``rollback`` specs (same shape) via ``label="rollback"``;
+    a rollback is the command that undoes its step during recovery.
+    """
 
     argv: tuple[str, ...]
     expect_exit: int = 0
 
     @classmethod
-    def from_dict(cls, data: Any, *, where: str) -> VerifySpec:
+    def from_dict(cls, data: Any, *, where: str, label: str = "verify") -> VerifySpec:
         if not isinstance(data, dict):
-            raise PlanError(f"{where}: verify must be an object")
-        argv = _argv_of(data.get("argv"), where=f"{where}.verify")
+            raise PlanError(f"{where}: {label} must be an object")
+        argv = _argv_of(data.get("argv"), where=f"{where}.{label}")
         expect_exit = data.get("expect_exit", 0)
         if not isinstance(expect_exit, int) or isinstance(expect_exit, bool):
-            raise PlanError(f"{where}: verify.expect_exit must be an integer")
+            raise PlanError(f"{where}: {label}.expect_exit must be an integer")
         return cls(argv=argv, expect_exit=expect_exit)
 
 
 @dataclass(frozen=True)
 class RunStep:
-    """One ordered step: a command plus an optional verification."""
+    """One ordered step: a command plus optional verification and rollback."""
 
     step_id: str
     title: str
@@ -79,6 +85,7 @@ class RunStep:
     cwd: str | None = None
     timeout_seconds: float | None = None
     verify: VerifySpec | None = None
+    rollback: VerifySpec | None = None
 
     @classmethod
     def from_dict(cls, data: Any, *, index: int) -> RunStep:
@@ -105,6 +112,12 @@ class RunStep:
             if verify_raw is not None
             else None
         )
+        rollback_raw = data.get("rollback")
+        rollback = (
+            VerifySpec.from_dict(rollback_raw, where=where, label="rollback")
+            if rollback_raw is not None
+            else None
+        )
         return cls(
             step_id=step_id,
             title=title,
@@ -112,6 +125,7 @@ class RunStep:
             cwd=cwd,
             timeout_seconds=float(timeout) if timeout is not None else None,
             verify=verify,
+            rollback=rollback,
         )
 
 
@@ -163,6 +177,9 @@ class StepReport:
     exit_code: int | None = None
     duration_seconds: float = 0.0
     verify_exit_code: int | None = None
+    rollback_status: str = ""
+    rollback_reason: str = ""
+    rollback_exit_code: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -175,6 +192,9 @@ class StepReport:
             "exit_code": self.exit_code,
             "duration_seconds": round(self.duration_seconds, 3),
             "verify_exit_code": self.verify_exit_code,
+            "rollback_status": self.rollback_status,
+            "rollback_reason": self.rollback_reason,
+            "rollback_exit_code": self.rollback_exit_code,
         }
 
 
@@ -292,10 +312,62 @@ class RunEngine:
             )
         return self._executor.run(spec, policy=verdict.to_decision(), task_id=task_id)
 
+    def _rollback(
+        self,
+        completed: list[tuple[RunStep, int]],
+        reports: list[StepReport],
+        task_id: str,
+    ) -> None:
+        """Undo completed steps after a failure, newest first.
+
+        Only plan-provided rollback commands run, and only when the policy
+        auto-allows them (R0/R1): a rollback that needs approval is skipped
+        and reported, never silently privileged (roadmap: rollback only when
+        authorized). A failing rollback is reported but does not mask the
+        original failure. A verify-failed step rolls itself back too (its
+        command ran but the postcondition did not hold); a command-failed
+        step does not (partial application makes its rollback unreliable).
+        Denied and approval-required stops never roll back: no failed work
+        happened, and the user may still approve and resume.
+        """
+
+        for step, report_index in reversed(completed):
+            if step.rollback is None:
+                continue
+            spec = CommandSpec(argv=step.rollback.argv, cwd=self._workspace)
+            verdict = self._engine.evaluate(spec)
+            if verdict.requirement is not Requirement.ALLOW:
+                reports[report_index] = replace(
+                    reports[report_index],
+                    rollback_status="skipped",
+                    rollback_reason=(
+                        f"rollback requires {verdict.requirement.name.lower()}: "
+                        f"{verdict.reason}"
+                    ),
+                )
+                continue
+            result = self._executor.run(
+                spec, policy=verdict.to_decision(), task_id=task_id
+            )
+            if result.exit_code == step.rollback.expect_exit:
+                reports[report_index] = replace(
+                    reports[report_index],
+                    rollback_status="ok",
+                    rollback_exit_code=result.exit_code,
+                )
+            else:
+                reports[report_index] = replace(
+                    reports[report_index],
+                    rollback_status="failed",
+                    rollback_reason="rollback command did not pass",
+                    rollback_exit_code=result.exit_code,
+                )
+
     def run(self, plan: RunPlan, *, task_id: str) -> RunReport:
         """Execute a plan; stop safely at the first step that cannot pass."""
 
         reports: list[StepReport] = []
+        completed: list[tuple[RunStep, int]] = []
         status = STATUS_OK
         for index, step in enumerate(plan.steps):
             residual = tuple(s.step_id for s in plan.steps[index + 1 :])
@@ -407,6 +479,7 @@ class RunEngine:
                         risk_level=verdict.level.name,
                     )
                 )
+                self._rollback(completed, reports, task_id)
                 return RunReport(
                     plan.goal, task_id, STATUS_FAILED, tuple(reports), residual
                 )
@@ -425,6 +498,7 @@ class RunEngine:
                         risk_level=verdict.level.name,
                     )
                 )
+                self._rollback(completed, reports, task_id)
                 return RunReport(
                     plan.goal, task_id, STATUS_FAILED, tuple(reports), residual
                 )
@@ -448,6 +522,8 @@ class RunEngine:
                             risk_level=verdict.level.name,
                         )
                     )
+                    completed.append((step, len(reports) - 1))
+                    self._rollback(completed, reports, task_id)
                     return RunReport(
                         plan.goal,
                         task_id,
@@ -467,6 +543,7 @@ class RunEngine:
                         risk_level=verdict.level.name,
                     )
                 )
+                completed.append((step, len(reports) - 1))
                 continue
             reports.append(
                 StepReport(
@@ -479,4 +556,5 @@ class RunEngine:
                     risk_level=verdict.level.name,
                 )
             )
+            completed.append((step, len(reports) - 1))
         return RunReport(plan.goal, task_id, status, tuple(reports), ())

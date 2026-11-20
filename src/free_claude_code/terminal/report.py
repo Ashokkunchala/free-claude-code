@@ -84,6 +84,11 @@ def render_run_summary(history: dict[str, Any]) -> str:
                 parts.append(f"verify exit {step['verify_exit_code']}")
             if step.get("duration_seconds"):
                 parts.append(f"{step['duration_seconds']}s")
+            if step.get("rollback_status"):
+                rollback = f"rollback {step['rollback_status']}"
+                if step.get("rollback_reason"):
+                    rollback += f" ({step['rollback_reason']})"
+                parts.append(rollback)
             if step.get("reason"):
                 parts.append(f"- {step['reason']}")
             lines.append(" ".join(parts))
