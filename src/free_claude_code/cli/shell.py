@@ -76,6 +76,8 @@ def _print_report(report: RunReport, *, as_json: bool) -> None:
     print(f"goal: {report.goal}" if report.goal else f"task {report.task_id}")
     for step in report.steps:
         line = f"  [{step.status}] {step.title}"
+        if step.rollback_status:
+            line += f" (rollback {step.rollback_status})"
         if step.reason:
             line += f" - {step.reason}"
         print(line)

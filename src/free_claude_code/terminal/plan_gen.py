@@ -27,7 +27,8 @@ _SCHEMA_HELP = """\
       "argv": ["executable", "arg1", "arg2"],
       "cwd": "optional working directory (must stay inside the workspace)",
       "timeout_seconds": 300,
-      "verify": {"argv": ["read-only", "check"], "expect_exit": 0}
+      "verify": {"argv": ["read-only", "check"], "expect_exit": 0},
+      "rollback": {"argv": ["undo", "this", "step"], "expect_exit": 0}
     }
   ]
 }"""
@@ -40,6 +41,9 @@ Rules:
   steps first, changes after.
 - Every mutating step should carry a verify command that proves its
   postcondition; verify commands must be read-only.
+- Give every reversible mutating step a rollback command that undoes it;
+  rollback runs only if a later step fails, and only when policy allows
+  it without approval (keep rollback commands read-only or reversible).
 - Commands are classified by risk: read-only runs automatically,
   privileged or destructive commands pause for human approval - use them
   only when the goal requires it.
