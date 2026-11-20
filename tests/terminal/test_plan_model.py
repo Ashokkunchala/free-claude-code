@@ -380,3 +380,62 @@ def test_fallback_mixed_failures_stay_plain_error():
         model("plan this")
     assert type(excinfo.value) is PlanModelError
     assert "planner-1" in str(excinfo.value) and "planner-2" in str(excinfo.value)
+
+
+def test_from_env_resolves_ollama_alias_to_local_endpoint():
+    model = plan_model_from_env(
+        {"FCC_PLAN_BASE_URL": "ollama", "FCC_PLAN_MODEL": "qwen2.5-coder"}
+    )
+    assert isinstance(model, ChatCompletionsModel)
+    seen = {}
+
+    def transport(url, payload, headers, timeout):
+        seen["url"] = url
+        seen["headers"] = headers
+        return {"choices": [{"message": {"content": "{}"}}]}
+
+    model._transport = transport
+    model("p")
+    assert seen["url"] == "http://localhost:11434/v1/chat/completions"
+    assert "Authorization" not in seen["headers"]
+
+
+def test_from_env_resolves_alias_in_fallback_entries():
+    from free_claude_code.terminal.plan_model import FallbackPlanModel
+
+    model = plan_model_from_env(
+        {
+            "FCC_PLAN_BASE_URL": "http://model.test/v1",
+            "FCC_PLAN_MODEL": "planner-1",
+            "FCC_PLAN_FALLBACKS": "ollama|qwen2.5-coder",
+        }
+    )
+    assert isinstance(model, FallbackPlanModel)
+    seen = []
+
+    def fail_transport(url, payload, headers, timeout):
+        seen.append(url)
+        raise PlanModelError("down")
+
+    for _, leg in model._legs:
+        leg._transport = fail_transport
+    with pytest.raises(PlanModelError):
+        model("p")
+    assert seen == [
+        "http://model.test/v1/chat/completions",
+        "http://localhost:11434/v1/chat/completions",
+    ]
+
+
+def test_from_env_leaves_plain_urls_untouched():
+    model = plan_model_from_env(_ENV)
+    seen = {}
+
+    def transport(url, payload, headers, timeout):
+        seen["url"] = url
+        return {"choices": [{"message": {"content": "{}"}}]}
+
+    assert isinstance(model, ChatCompletionsModel)
+    model._transport = transport
+    model("p")
+    assert seen["url"] == "http://model.test/v1/chat/completions"
