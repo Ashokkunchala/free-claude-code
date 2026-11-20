@@ -33,6 +33,19 @@ _ENV_FALLBACKS = "FCC_PLAN_FALLBACKS"
 
 _DEFAULT_TIMEOUT = 120.0
 
+#: First-class local-model aliases (roadmap section 9): name -> OpenAI-
+#: compatible endpoint. A local server needs no API key and keeps prompts
+#: on the machine; offline operation depends on the server running.
+_LOCAL_ALIASES = {
+    "ollama": "http://localhost:11434/v1",
+}
+
+
+def _resolve_base_url(raw: str) -> str:
+    """Map a local-model alias to its endpoint; pass URLs through."""
+
+    return _LOCAL_ALIASES.get(raw.strip().lower(), raw)
+
 
 class PlanModelError(Exception):
     """The model endpoint could not supply a usable response."""
@@ -203,7 +216,7 @@ def _parse_fallbacks(raw: str) -> list[tuple[str, str, str | None]]:
                 f"[|api_key], got {chunk!r}"
             )
         api_key = (parts[2] or None) if len(parts) == 3 else None
-        entries.append((parts[0], parts[1], api_key))
+        entries.append((_resolve_base_url(parts[0]), parts[1], api_key))
     return entries
 
 
@@ -214,6 +227,8 @@ def plan_model_from_env(
 
     With FCC_PLAN_FALLBACKS set, the primary is tried first and each
     fallback in order; without it, the primary adapter is returned alone.
+    A base URL may be a local-model alias ("ollama") for offline/private
+    planning against a local server.
     """
 
     env = os.environ if environ is None else environ
@@ -236,7 +251,7 @@ def plan_model_from_env(
         if timeout <= 0:
             raise PlanModelError(f"{_ENV_TIMEOUT} must be positive")
     primary = ChatCompletionsModel(
-        base_url=env[_ENV_BASE_URL],
+        base_url=_resolve_base_url(env[_ENV_BASE_URL]),
         model=env[_ENV_MODEL],
         api_key=env.get(_ENV_API_KEY) or None,
         timeout=timeout,
