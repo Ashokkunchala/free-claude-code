@@ -136,6 +136,7 @@ def propose_plan_with_feedback(
     *,
     workspace: str | None = None,
     context: str | None = None,
+    skills: str | None = None,
     attempts: int = 2,
 ) -> RunPlan:
     """propose_plan with one correction round when the response is not a plan."""
@@ -151,7 +152,11 @@ def propose_plan_with_feedback(
             )
         try:
             return propose_plan(
-                prompt_task, model, workspace=workspace, context=context
+                prompt_task,
+                model,
+                workspace=workspace,
+                context=context,
+                skills=skills,
             )
         except PlanError as exc:
             last_error = exc
@@ -166,12 +171,15 @@ def propose_repair(
     *,
     workspace: str | None = None,
     context: str | None = None,
+    skills: str | None = None,
     attempts: int = 2,
 ) -> RunPlan:
     """Ask the model for a residual plan after a failed run, with feedback."""
 
     last_error: PlanError | None = None
-    prompt = build_repair_prompt(task, report, workspace=workspace, context=context)
+    prompt = build_repair_prompt(
+        task, report, workspace=workspace, context=context, skills=skills
+    )
     for _ in range(max(1, attempts)):
         candidate = prompt
         if last_error is not None:

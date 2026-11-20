@@ -32,6 +32,7 @@ from free_claude_code.cli.run import (
     _STATUS_EXIT,
     EXIT_BAD_PLAN,
     EXIT_ERROR,
+    _skills_guidance,
 )
 from free_claude_code.config.paths import (
     approval_secret_path,
@@ -91,6 +92,7 @@ def _run_task(
     *,
     model: Callable[[str], str],
     context: str | None,
+    skills: str | None,
     engine: RunEngine,
     workspace: str,
     runs_dir: Path,
@@ -106,6 +108,7 @@ def _run_task(
             model,
             workspace=workspace,
             context=context,
+            skills=skills,
             attempts=model_attempts,
         )
     except PlanModelError as exc:
@@ -132,6 +135,7 @@ def _run_task(
                 model,
                 workspace=workspace,
                 context=context,
+                skills=skills,
                 attempts=model_attempts,
             )
         except PlanModelError as exc:
@@ -189,6 +193,23 @@ def main(argv: Sequence[str] | None = None) -> None:
         action="store_true",
         help="Do not attach observed workspace context to plan prompts",
     )
+    parser.add_argument(
+        "--no-skills",
+        action="store_true",
+        help="Do not attach enabled skill-pack guidance to plan prompts",
+    )
+    parser.add_argument(
+        "--packs",
+        type=Path,
+        default=None,
+        help="Skill-pack directory (default: the user packs directory)",
+    )
+    parser.add_argument(
+        "--skills-state",
+        type=Path,
+        default=None,
+        help="Skill enablement state file (default: the user state file)",
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON reports")
     parser.add_argument("--approvals-file", type=Path, default=None)
     parser.add_argument("--secret-file", type=Path, default=None)
@@ -212,6 +233,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     context = None
     if not args.no_context:
         context = render_env_context(collect_env_context(str(workspace)))
+    skills = _skills_guidance(args)
 
     sink = JsonlAuditSink(
         args.audit_file if args.audit_file is not None else audit_log_path()
@@ -279,6 +301,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             turn,
             model=model,
             context=context,
+            skills=skills,
             engine=engine,
             workspace=str(workspace),
             runs_dir=runs_dir,

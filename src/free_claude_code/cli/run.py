@@ -23,6 +23,12 @@ from free_claude_code.config.paths import (
     audit_log_path,
     runs_dir_path,
 )
+from free_claude_code.skills import merged_packs, render_plan_guidance
+from free_claude_code.skills.state import (
+    SkillState,
+    default_packs_dir,
+    default_state_path,
+)
 from free_claude_code.terminal import (
     FileApprovalStore,
     JsonlAuditSink,
@@ -77,6 +83,17 @@ def _print_report(report: RunReport, *, as_json: bool) -> None:
     print(f"status: {report.status} (task {report.task_id})")
 
 
+def _skills_guidance(args: argparse.Namespace) -> str | None:
+    """Enabled skill-pack guidance for the plan prompt, or None when off."""
+
+    if args.no_skills:
+        return None
+    packs_root = (args.packs or default_packs_dir()).resolve()
+    state = SkillState((args.skills_state or default_state_path()).resolve())
+    guidance = render_plan_guidance(merged_packs(packs_root), state)
+    return guidance or None
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     """CLI for plan-driven runs."""
 
@@ -95,6 +112,23 @@ def main(argv: Sequence[str] | None = None) -> None:
         "--no-context",
         action="store_true",
         help="Do not attach observed workspace context to the plan prompt",
+    )
+    parser.add_argument(
+        "--no-skills",
+        action="store_true",
+        help="Do not attach enabled skill-pack guidance to the plan prompt",
+    )
+    parser.add_argument(
+        "--packs",
+        type=Path,
+        default=None,
+        help="Skill-pack directory (default: the user packs directory)",
+    )
+    parser.add_argument(
+        "--skills-state",
+        type=Path,
+        default=None,
+        help="Skill enablement state file (default: the user state file)",
     )
     parser.add_argument(
         "--model-attempts",
@@ -236,12 +270,14 @@ def main(argv: Sequence[str] | None = None) -> None:
         context = None
         if not args.no_context:
             context = render_env_context(collect_env_context(str(workspace)))
+        skills = _skills_guidance(args)
         try:
             plan = propose_plan_with_feedback(
                 args.task,
                 model,
                 workspace=str(workspace),
                 context=context,
+                skills=skills,
                 attempts=args.model_attempts,
             )
         except PlanModelError as exc:
@@ -332,6 +368,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 model,
                 workspace=str(workspace),
                 context=context,
+                skills=skills,
                 attempts=args.model_attempts,
             )
         except PlanModelError as exc:

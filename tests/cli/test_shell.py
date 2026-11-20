@@ -59,7 +59,7 @@ def plan_for(argv):
 def stub_propose(monkeypatch, shell_cli, plans, seen=None):
     queue = iter(plans)
 
-    def fake(task, model, *, workspace, context, attempts):
+    def fake(task, model, *, workspace, context, skills, attempts):
         if seen is not None:
             seen.append((task, context))
         return next(queue)
@@ -158,7 +158,7 @@ def test_history_prints_recorded_run(capsys, repo, fake_model, monkeypatch):
 def test_invalid_model_plan_exits_two(capsys, tmp_path, fake_model, monkeypatch):
     from free_claude_code.terminal import PlanError
 
-    def junk(task, model, *, workspace, context, attempts):
+    def junk(task, model, *, workspace, context, skills, attempts):
         raise PlanError("steps must be a non-empty array")
 
     monkeypatch.setattr(fake_model, "propose_plan_with_feedback", junk)
@@ -180,7 +180,7 @@ def test_repair_loop_runs_on_failure(capsys, repo, fake_model, monkeypatch):
     stub_propose(monkeypatch, fake_model, [plan_for(("git", "log"))])
     repairs = []
 
-    def fake_repair(task, report, model, *, workspace, context, attempts):
+    def fake_repair(task, report, model, *, workspace, context, skills, attempts):
         repairs.append(report.status)
         return plan_for(GIT_STATUS)
 
@@ -196,3 +196,57 @@ def test_failed_task_sticks_exit_code(capsys, tmp_path, fake_model, monkeypatch)
     code = invoke(base_args(tmp_path), "go\n", monkeypatch)
     assert code == 1
     assert "status: failed" in capsys.readouterr().out
+
+
+_PACK_MANIFEST = """
+name = "{name}"
+version = "0.1.0"
+purpose = "Test pack"
+platforms = ["linux"]
+max_risk = "r0"
+executable = false
+"""
+
+
+def test_skill_guidance_attached_to_every_task(capsys, repo, fake_model, monkeypatch):
+    packs_dir = repo / "packs"
+    pack = packs_dir / "docker-triage"
+    pack.mkdir(parents=True)
+    (pack / "skill.toml").write_text(
+        _PACK_MANIFEST.format(name="docker-triage"), encoding="utf-8"
+    )
+    (pack / "SKILL.md").write_text("Run docker ps first.", encoding="utf-8")
+    captured = []
+
+    def fake(task, model, *, workspace, context, skills, attempts):
+        captured.append(skills)
+        return plan_for(GIT_STATUS)
+
+    monkeypatch.setattr(fake_model, "propose_plan_with_feedback", fake)
+    code = invoke(
+        [
+            *base_args(repo),
+            "--packs",
+            str(packs_dir),
+            "--skills-state",
+            str(repo / "skills-state.json"),
+        ],
+        "one\ntwo\nexit\n",
+        monkeypatch,
+    )
+    assert code == 0
+    assert len(captured) == 2
+    assert all(skills is not None and "docker-triage" in skills for skills in captured)
+
+
+def test_no_skills_passes_none(capsys, repo, fake_model, monkeypatch):
+    captured = []
+
+    def fake(task, model, *, workspace, context, skills, attempts):
+        captured.append(skills)
+        return plan_for(GIT_STATUS)
+
+    monkeypatch.setattr(fake_model, "propose_plan_with_feedback", fake)
+    code = invoke([*base_args(repo), "--no-skills"], "one\nexit\n", monkeypatch)
+    assert code == 0
+    assert captured == [None]

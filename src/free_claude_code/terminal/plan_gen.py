@@ -55,7 +55,11 @@ Rules:
 
 
 def build_plan_prompt(
-    task: str, *, workspace: str | None = None, context: str | None = None
+    task: str,
+    *,
+    workspace: str | None = None,
+    context: str | None = None,
+    skills: str | None = None,
 ) -> str:
     """The exact prompt a model should answer with one JSON plan."""
 
@@ -63,11 +67,17 @@ def build_plan_prompt(
     observed = (
         f"\n\nObserved environment (read-only facts):\n{context}" if context else ""
     )
+    guidance = (
+        "\n\nEnabled skill packs (operator guidance; follow it where it "
+        f"applies):\n{skills}"
+        if skills
+        else ""
+    )
     return (
         "You are planning work for a policy-enforced terminal agent. Produce "
         "a plan as ONE JSON object and nothing else (no prose, no Markdown "
         "fences).\n"
-        f"Task: {task}{where}{observed}\n\n"
+        f"Task: {task}{where}{observed}{guidance}\n\n"
         f"The plan must match this shape:\n{_SCHEMA_HELP}\n\n{_RULES}\n"
     )
 
@@ -118,11 +128,14 @@ def propose_plan(
     *,
     workspace: str | None = None,
     context: str | None = None,
+    skills: str | None = None,
 ) -> RunPlan:
     """One round-trip: build the prompt, call the port, validate the plan."""
 
     return plan_from_response(
-        model(build_plan_prompt(task, workspace=workspace, context=context))
+        model(
+            build_plan_prompt(task, workspace=workspace, context=context, skills=skills)
+        )
     )
 
 
@@ -141,6 +154,7 @@ def build_repair_prompt(
     *,
     workspace: str | None = None,
     context: str | None = None,
+    skills: str | None = None,
 ) -> str:
     """Prompt asking the model to repair a failed run with a residual plan."""
 
@@ -171,6 +185,11 @@ def build_repair_prompt(
         lines.append(f"Steps never run: {', '.join(report.residual)}")
     if context:
         lines.append(f"Observed environment (read-only facts):\n{context}")
+    if skills:
+        lines.append(
+            "Enabled skill packs (operator guidance; follow it where it "
+            f"applies):\n{skills}"
+        )
     lines.append(
         "\nProduce the replacement plan as ONE JSON object in the same shape "
         "as before and nothing else."
