@@ -36,6 +36,22 @@ class Requirement(IntEnum):
     DENY = 3
 
 
+class EgressMode(IntEnum):
+    """Network egress control for commands that leave the machine.
+
+    ``OPEN`` keeps the risk-tier flow unchanged. ``ALLOWLIST`` denies
+    network-capable commands whose target hosts are not all in
+    ``PolicyConfig.network_allow`` (or cannot be determined). ``DENIED``
+    denies every network-capable command. Both restrictions deny rather
+    than approve: the egress boundary is a configured control, so an
+    approval prompt must not bypass it.
+    """
+
+    OPEN = 0
+    ALLOWLIST = 1
+    DENIED = 2
+
+
 @dataclass(frozen=True)
 class PolicyVerdict:
     """The engine's assessment of one command."""
@@ -74,12 +90,20 @@ class PolicyConfig:
     ``extra_allow`` downgrades listed executables to an automatic allow;
     ``extra_deny`` denies them outright. Both match the executable basename
     (lowercase, no ``.exe`` suffix).
+
+    ``network_egress`` bounds commands that leave the machine; hosts in
+    ``network_allow`` are lowercase hostnames, where a leading dot
+    (``.example.com``) also matches every subdomain. The egress check runs
+    before ``extra_allow``, so a configured network boundary cannot be
+    auto-approved away.
     """
 
     workspace_root: str | None = None
     auto_approve_max: RiskLevel = RiskLevel.R1_REVERSIBLE
     extra_allow: frozenset[str] = frozenset()
     extra_deny: frozenset[str] = frozenset()
+    network_egress: EgressMode = EgressMode.OPEN
+    network_allow: frozenset[str] = frozenset()
 
 
 _R0_COMMANDS = frozenset(
@@ -592,6 +616,185 @@ def confinement_violation(cwd: str | None, workspace_root: str | None) -> str | 
     return f"cwd {real_cwd} is outside workspace root {real_root}"
 
 
+# Commands whose normal operation crosses the network boundary. Package
+# managers and cloud CLIs reach registries/APIs even for read verbs; git is
+# network-capable only for the subcommands that talk to a remote.
+_EGRESS_COMMANDS = (
+    _REMOTE_COMMANDS
+    | _CLOUD_CLIS
+    | {
+        "azcopy",
+        "docker",
+        "helm",
+        "kubectl",
+        "nc",
+        "ncat",
+        "netcat",
+        "npm",
+        "npx",
+        "pip",
+        "pip3",
+        "pnpm",
+        "podman",
+        "telnet",
+        "terraform",
+        "tofu",
+        "uv",
+        "yarn",
+    }
+)
+
+_GIT_EGRESS_SUBCOMMANDS = _GIT_NETWORK | {"push"}
+
+_EGRESS_ENV_MODE = "FCC_NETWORK_EGRESS"
+_EGRESS_ENV_ALLOW = "FCC_NETWORK_ALLOW"
+
+
+def _host_from_url(arg: str) -> str | None:
+    """Extract a hostname from a URL or scp-style argument."""
+
+    if "://" in arg:
+        from urllib.parse import urlsplit
+
+        try:
+            host = urlsplit(arg).hostname
+        except ValueError:
+            return None
+        return host.lower() if host else None
+    # scp-style: [user@]host:path (git remotes, scp, rsync).
+    if ":" in arg and not arg.startswith("-"):
+        target = arg.split(":", 1)[0]
+        host = target.rsplit("@", 1)[-1]
+        # A bare letter is a Windows drive (C:\...), not a host.
+        if host and len(host) > 1 and "/" not in host and "\\" not in host:
+            return host.lower()
+    return None
+
+
+def _egress_hosts(name: str, args: tuple[str, ...]) -> frozenset[str] | None:
+    """Best-effort target hosts for a network-capable command.
+
+    Returns ``None`` when no target can be determined (for example
+    ``git push origin`` names a configured remote, and cloud CLIs hide
+    their endpoints behind profiles); the allowlist treats that as
+    unverifiable. An empty frozenset means the command takes no remote
+    target at all (for example ``ssh`` with only flags), which the
+    allowlist also refuses: flags such as ``-o ProxyCommand`` can still
+    smuggle a connection.
+    """
+
+    hosts: set[str] = set()
+    positional = 0
+    for arg in args:
+        if arg.startswith("-"):
+            continue
+        host = _host_from_url(arg)
+        if host is not None:
+            hosts.add(host)
+            continue
+        if name in ("ssh", "sftp", "nc", "ncat", "netcat", "telnet"):
+            positional += 1
+            if positional == 1:
+                hosts.add(arg.rsplit("@", 1)[-1].lower())
+    if name == "git":
+        # Non-URL positionals name configured remotes, not hosts.
+        return frozenset(hosts) if hosts else None
+    return frozenset(hosts)
+
+
+def _host_allowed(host: str, allow: frozenset[str]) -> bool:
+    for entry in allow:
+        if host == entry:
+            return True
+        if entry.startswith(".") and (host == entry[1:] or host.endswith(entry)):
+            return True
+    return False
+
+
+def _egress_verdict(
+    argv: tuple[str, ...], config: PolicyConfig
+) -> PolicyVerdict | None:
+    """Apply the network egress boundary, or None when it does not bind."""
+
+    if config.network_egress is EgressMode.OPEN:
+        return None
+    name = _basename(argv[0])
+    if name == "git":
+        sub = next((arg for arg in argv[1:] if not arg.startswith("-")), "")
+        if sub not in _GIT_EGRESS_SUBCOMMANDS:
+            return None
+    elif name not in _EGRESS_COMMANDS:
+        return None
+    if config.network_egress is EgressMode.DENIED:
+        return PolicyVerdict(
+            level=RiskLevel.R3_DESTRUCTIVE,
+            requirement=Requirement.DENY,
+            reason=f"{name} needs the network, and egress is disabled by configuration",
+            policy_id="deny:egress",
+        )
+    hosts = _egress_hosts(name, argv[1:])
+    if not hosts:
+        return PolicyVerdict(
+            level=RiskLevel.R3_DESTRUCTIVE,
+            requirement=Requirement.DENY,
+            reason=(
+                f"{name} needs the network, and its target hosts could not be "
+                "verified against the allowlist"
+            ),
+            policy_id="deny:egress-unverifiable",
+        )
+    for host in sorted(hosts):
+        if not _host_allowed(host, config.network_allow):
+            return PolicyVerdict(
+                level=RiskLevel.R3_DESTRUCTIVE,
+                requirement=Requirement.DENY,
+                reason=(
+                    f"{name} targets {host}, which is not in the configured "
+                    "network allowlist"
+                ),
+                policy_id="deny:egress-allowlist",
+            )
+    return None
+
+
+_EGRESS_MODES = {
+    "open": EgressMode.OPEN,
+    "allowlist": EgressMode.ALLOWLIST,
+    "deny": EgressMode.DENIED,
+    "denied": EgressMode.DENIED,
+}
+
+
+def policy_config_from_env(
+    workspace_root: str | None = None, environ: dict[str, str] | None = None
+) -> PolicyConfig:
+    """Build a PolicyConfig, honoring the FCC_NETWORK_* environment.
+
+    ``FCC_NETWORK_EGRESS`` is ``open`` (default), ``allowlist`` or ``deny``;
+    ``FCC_NETWORK_ALLOW`` is a comma-separated host allowlist (a leading dot
+    matches subdomains). An unknown egress value raises ValueError so a
+    misspelled mode can never silently weaken the boundary.
+    """
+
+    env = os.environ if environ is None else environ
+    raw_mode = env.get(_EGRESS_ENV_MODE, "open").strip().lower()
+    if raw_mode not in _EGRESS_MODES:
+        allowed = "open, allowlist, deny"
+        raise ValueError(
+            f"{_EGRESS_ENV_MODE} must be one of: {allowed} (got {raw_mode!r})"
+        )
+    allow = frozenset(
+        entry.strip().lower()
+        for entry in env.get(_EGRESS_ENV_ALLOW, "").split(",")
+        if entry.strip()
+    )
+    return PolicyConfig(
+        workspace_root=workspace_root,
+        network_egress=_EGRESS_MODES[raw_mode],
+        network_allow=allow,
+    )
+
+
 class PolicyEngine:
     """Combines classification, confinement and config into verdicts."""
 
@@ -626,6 +829,9 @@ class PolicyEngine:
                 reason=violation,
                 policy_id="deny:workspace-escape",
             )
+        egress = _egress_verdict(spec.argv, self._config)
+        if egress is not None:
+            return egress
         level, rule = classify(spec.argv)
         if name in self._config.extra_allow:
             return PolicyVerdict(

@@ -49,7 +49,7 @@ from free_claude_code.terminal import (
     render_run_summary,
 )
 from free_claude_code.terminal.approval import ApprovalTokenIssuer
-from free_claude_code.terminal.policy import PolicyConfig, PolicyEngine
+from free_claude_code.terminal.policy import PolicyEngine, policy_config_from_env
 from free_claude_code.terminal.spec import CommandSpec
 
 EXIT_ERROR = 1
@@ -307,7 +307,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             raise SystemExit(EXIT_BAD_PLAN) from None
 
     if args.dry_run:
-        engine = PolicyEngine(PolicyConfig(workspace_root=str(workspace)))
+        engine = PolicyEngine(policy_config_from_env(workspace_root=str(workspace)))
         rows = []
         for step in plan.steps:
             try:

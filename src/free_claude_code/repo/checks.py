@@ -20,11 +20,11 @@ from free_claude_code.repo.files import EditResult, edit_file, rollback
 from free_claude_code.terminal import (
     CommandResult,
     CommandSpec,
-    PolicyConfig,
     PolicyEngine,
     PolicyRejectedError,
     Requirement,
     TerminalExecutor,
+    policy_config_from_env,
 )
 from free_claude_code.terminal.spec import DEFAULT_TIMEOUT_SECONDS
 
@@ -102,7 +102,7 @@ class CheckRunner:
         self._engine = (
             engine
             if engine is not None
-            else PolicyEngine(PolicyConfig(workspace_root=str(self._root)))
+            else PolicyEngine(policy_config_from_env(workspace_root=str(self._root)))
         )
 
     @property

@@ -44,11 +44,13 @@ from free_claude_code.terminal.plan_model import (
     propose_repair,
 )
 from free_claude_code.terminal.policy import (
+    EgressMode,
     PolicyConfig,
     PolicyEngine,
     PolicyVerdict,
     Requirement,
     RiskLevel,
+    policy_config_from_env,
 )
 from free_claude_code.terminal.redaction import Redactor
 from free_claude_code.terminal.report import (
@@ -108,6 +110,7 @@ __all__ = [
     "CommandResult",
     "CommandScheduler",
     "CommandSpec",
+    "EgressMode",
     "EnvContext",
     "FallbackPlanModel",
     "FileApprovalStore",
@@ -158,6 +161,7 @@ __all__ = [
     "load_run_history",
     "plan_from_response",
     "plan_model_from_env",
+    "policy_config_from_env",
     "propose_plan",
     "propose_plan_with_feedback",
     "propose_repair",

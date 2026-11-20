@@ -23,11 +23,11 @@ from free_claude_code.terminal import (
     CommandResult,
     CommandSpec,
     JsonlAuditSink,
-    PolicyConfig,
     PolicyEngine,
     PolicyVerdict,
     Requirement,
     TerminalExecutor,
+    policy_config_from_env,
 )
 from free_claude_code.terminal.approval import ApprovalTokenIssuer
 from free_claude_code.terminal.approval_store import (
@@ -204,7 +204,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(f"fcc-exec: {exc}", file=sys.stderr)
         raise SystemExit(EXIT_ERROR) from None
 
-    engine = PolicyEngine(PolicyConfig(workspace_root=str(workspace)))
+    engine = PolicyEngine(policy_config_from_env(workspace_root=str(workspace)))
     verdict = engine.evaluate(spec)
     if verdict.requirement is Requirement.DENY:
         print(f"policy denied: {verdict.reason}", file=sys.stderr)
