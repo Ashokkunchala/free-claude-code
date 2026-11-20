@@ -28,12 +28,14 @@ from free_claude_code.terminal import (
     collect_listeners,
     collect_processes,
     collect_services,
+    collect_toolchain,
     load_run_history,
     render_env_context,
     render_listeners,
     render_processes,
     render_run_summary,
     render_services,
+    render_toolchain,
 )
 
 _DEFAULT_GREP_LIMIT = 100
@@ -79,6 +81,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     subparsers.add_parser("status", help="Git state and workspace summary")
 
     subparsers.add_parser("env", help="Platform, shell, git and workspace listing")
+    subparsers.add_parser(
+        "toolchain", help="Detected DevOps tools and install guidance"
+    )
 
     processes_parser = subparsers.add_parser(
         "processes", help="Running processes (pid, memory, command)"
@@ -170,6 +175,16 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         else:
             print(render_env_context(context))
+        return
+
+    if args.command == "toolchain":
+        tools = collect_toolchain()
+        if args.json:
+            print(
+                json.dumps({"tools": [dataclasses.asdict(t) for t in tools]}, indent=2)
+            )
+        else:
+            print(render_toolchain(tools))
         return
 
     if args.command == "processes":
