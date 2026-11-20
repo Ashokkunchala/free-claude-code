@@ -359,3 +359,20 @@ def test_logs_unsupported_platform_fails(workspace: Path, capsys, monkeypatch) -
     with pytest.raises(SystemExit):
         run(["--workspace", str(workspace), "logs"])
     assert "not supported" in capsys.readouterr().err
+
+
+def test_toolchain_json(tmp_path: Path, capsys) -> None:
+    main(["--workspace", str(tmp_path), "--json", "toolchain"])
+    report = json.loads(capsys.readouterr().out)
+    names = {tool["name"] for tool in report["tools"]}
+    assert "docker" in names
+    assert "kubectl" in names
+    for tool in report["tools"]:
+        if tool["path"] is None:
+            assert tool["install_hint"]
+
+
+def test_toolchain_text(tmp_path: Path, capsys) -> None:
+    main(["--workspace", str(tmp_path), "toolchain"])
+    out = capsys.readouterr().out
+    assert "docker" in out

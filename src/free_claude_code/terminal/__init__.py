@@ -88,6 +88,12 @@ from free_claude_code.terminal.system_inspect import (
     render_processes,
     render_services,
 )
+from free_claude_code.terminal.toolchain import (
+    ToolInfo,
+    ToolSpec,
+    collect_toolchain,
+    render_toolchain,
+)
 
 __all__ = [
     "DEFAULT_POLICY_DECISION",
@@ -131,6 +137,8 @@ __all__ = [
     "SystemInspectError",
     "TerminalExecutor",
     "TerminalExecutorError",
+    "ToolInfo",
+    "ToolSpec",
     "VerifySpec",
     "append_run_record",
     "build_plan_prompt",
@@ -140,6 +148,7 @@ __all__ = [
     "collect_listeners",
     "collect_processes",
     "collect_services",
+    "collect_toolchain",
     "command_fingerprint",
     "extract_plan_json",
     "load_run_history",
@@ -153,4 +162,5 @@ __all__ = [
     "render_processes",
     "render_run_summary",
     "render_services",
+    "render_toolchain",
 ]
