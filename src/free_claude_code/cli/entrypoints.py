@@ -76,6 +76,13 @@ def run_plan(argv: Sequence[str] | None = None) -> None:
     main(argv)
 
 
+def shell(argv: Sequence[str] | None = None) -> None:
+    """Interactive agent session (registered as ``fcc-shell``)."""
+    from free_claude_code.cli.shell import main
+
+    main(argv)
+
+
 def exec_command(argv: Sequence[str] | None = None) -> None:
     """Run one command through policy enforcement (registered as ``fcc-exec``)."""
     from free_claude_code.cli.runner import main
