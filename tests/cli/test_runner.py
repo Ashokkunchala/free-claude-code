@@ -7,11 +7,13 @@ from pathlib import Path
 import pytest
 
 from free_claude_code.cli import approvals as approvals_cli
+from free_claude_code.cli import runner
 from free_claude_code.cli.runner import (
     EXIT_APPROVAL_REQUIRED,
     EXIT_POLICY_DENIED,
     main,
 )
+from free_claude_code.terminal import CommandResult
 from free_claude_code.terminal.approval_store import (
     STATUS_PENDING,
     FileApprovalStore,
@@ -185,3 +187,35 @@ def test_workspace_escape_denied(tmp_path: Path, capsys) -> None:
     ]
     # cwd is the workspace itself, confined: allowed.
     assert run(args) == 0
+
+
+class _RecordingExecutor:
+    def __init__(self, sink=None) -> None:
+        self.calls: list[tuple[bool, bool]] = []
+
+    def run(self, spec, *, policy, task_id=None, allow_pty=False):
+        self.calls.append((spec.pty, allow_pty))
+        return CommandResult(
+            argv=spec.argv,
+            cwd=spec.cwd,
+            exit_code=0,
+            duration_seconds=0.0,
+            stdout=b"",
+            stderr=b"",
+        )
+
+
+def test_pty_flag_wires_spec_and_gate(paths: dict[str, Path], monkeypatch) -> None:
+    executor = _RecordingExecutor()
+    monkeypatch.setattr(runner, "TerminalExecutor", lambda sink: executor)
+    code = run([*base_args(paths), "--pty", "--", "echo", "hi"])
+    assert code == 0
+    assert executor.calls == [(True, True)]
+
+
+def test_pty_off_by_default(paths: dict[str, Path], monkeypatch) -> None:
+    executor = _RecordingExecutor()
+    monkeypatch.setattr(runner, "TerminalExecutor", lambda sink: executor)
+    code = run([*base_args(paths), "--", "echo", "hi"])
+    assert code == 0
+    assert executor.calls == [(False, False)]

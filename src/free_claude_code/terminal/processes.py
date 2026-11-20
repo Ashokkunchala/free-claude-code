@@ -10,12 +10,13 @@ their existing behavior until they migrate.
 import atexit
 import contextlib
 import os
+import shutil
 import signal
 import subprocess
 import sys
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, cast
 
 from loguru import logger
@@ -30,6 +31,48 @@ def pty_supported() -> bool:
     """PTY allocation uses the stdlib pty module, which is POSIX-only."""
 
     return os.name != "nt"
+
+
+def apply_terminal_size(master_fd: int) -> None:
+    """Copy the caller's current terminal size onto a pty master (POSIX only).
+
+    Interactive children lay out their output against the pty's window size;
+    a fresh pty defaults to 0x0, which full-screen programs mishandle. The
+    size comes from ``shutil.get_terminal_size`` (COLUMNS/LINES, then the
+    real terminal) with an 80x24 fallback when the caller has no terminal.
+    """
+
+    if os.name == "nt":
+        return
+    import fcntl
+    import struct
+    import termios
+
+    size = shutil.get_terminal_size(fallback=(80, 24))
+    winsz = struct.pack("HHHH", size.lines, size.columns, 0, 0)
+    with contextlib.suppress(OSError):
+        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsz)
+
+
+@contextlib.contextmanager
+def forward_resize(master_fd: int) -> Iterator[None]:
+    """Forward terminal resizes (SIGWINCH) to a pty master while active.
+
+    Signal handlers are process-global and installable only on the main
+    thread, so off the main thread (and on Windows, which has no SIGWINCH)
+    this is a no-op: the pty keeps the size captured at spawn.
+    """
+
+    if os.name == "nt" or threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = signal.signal(
+        signal.SIGWINCH, lambda *_args: apply_terminal_size(master_fd)
+    )
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGWINCH, previous)
 
 
 def spawn(
@@ -59,7 +102,9 @@ def spawn(
     (POSIX only, ignored with ``inherit_stdio``): the child's stdin/stdout/
     stderr all attach to the slave end and the parent's master is exposed as
     ``process.stdout`` with ``process.stderr`` set to None, so output arrives
-    merged on one stream.
+    merged on one stream. The slave becomes the child's controlling terminal
+    (so resizes arrive as SIGWINCH) and starts at the caller's current
+    terminal size instead of the kernel's 0x0 default.
     """
 
     kwargs: dict[str, Any] = {}
@@ -74,6 +119,7 @@ def spawn(
         import pty as pty_module
 
         master_fd, slave_fd = pty_module.openpty()
+        apply_terminal_size(master_fd)
         kwargs["stdin"] = slave_fd
         kwargs["stdout"] = slave_fd
         kwargs["stderr"] = slave_fd
@@ -90,6 +136,8 @@ def spawn(
         else:
             kwargs["start_new_session"] = True
     preexec = _make_limit_preexec(max_cpu_seconds, max_memory_bytes)
+    if use_pty:
+        preexec = _make_ctty_preexec(preexec)
     if preexec is not None:
         kwargs["preexec_fn"] = preexec
     try:
@@ -110,6 +158,31 @@ def spawn(
         with _lock:
             _tracked[process.pid] = process
     return process
+
+
+def _make_ctty_preexec(limit_preexec: Any) -> Any:
+    """Preexec making the pty slave the child's controlling terminal.
+
+    Without a controlling terminal the kernel has no foreground process
+    group to signal, so winsize changes never reach the child as SIGWINCH
+    and job-control programs cannot find /dev/tty. subprocess runs
+    ``start_new_session``'s setsid before preexec_fn, so the child is a
+    session leader here and TIOCSCTTY attaches the slave (fd 0) cleanly.
+    """
+
+    def make_ctty() -> None:
+        if limit_preexec is not None:
+            limit_preexec()
+        import fcntl
+        import termios
+
+        # Best effort: without start_new_session (isolated=False) the child
+        # is no session leader and TIOCSCTTY fails with EPERM; the pty still
+        # works, only resize signalling is lost.
+        with contextlib.suppress(OSError):
+            fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+    return make_ctty
 
 
 def _make_limit_preexec(

@@ -11,6 +11,7 @@ per-chunk redaction - a secret split exactly across a chunk boundary could
 reach the callback; treat callbacks as progress display, not storage.
 """
 
+import contextlib
 import subprocess
 import threading
 import time
@@ -137,15 +138,21 @@ class TerminalExecutor:
 
         timed_out = False
         cancelled = False
-        try:
-            timed_out, cancelled = self._await_exit(process, spec, cancel_event)
-        finally:
-            for reader in readers:
-                reader.join(timeout=5.0)
-            for pipe in (process.stdout, process.stderr):
-                if pipe is not None:
-                    pipe.close()
-            processes.untrack(process)
+        resize = (
+            processes.forward_resize(process.stdout.fileno())
+            if use_pty and processes.pty_supported() and process.stdout is not None
+            else contextlib.nullcontext()
+        )
+        with resize:
+            try:
+                timed_out, cancelled = self._await_exit(process, spec, cancel_event)
+            finally:
+                for reader in readers:
+                    reader.join(timeout=5.0)
+                for pipe in (process.stdout, process.stderr):
+                    if pipe is not None:
+                        pipe.close()
+                processes.untrack(process)
 
         duration = time.monotonic() - started
         exit_code = process.returncode
