@@ -1,0 +1,23 @@
+name = "sql-inspect"
+version = "0.1.0"
+purpose = "Read-only SQL inspection: schema analysis, safe queries and migration review"
+platforms = ["linux", "macos", "windows"]
+required_tools = []
+max_risk = "r1"
+approval_from = "r2"
+timeout_seconds = 600
+rollback = "Read-only queries only; no rollback applies"
+verification = ["Connection target (host, database, role) reported with every finding", "Every query shown is read-only (SELECT/EXPLAIN/SHOW)"]
+executable = false
+
+[[tools]]
+name = "schema-map"
+description = "Summarize tables, columns, indexes, foreign keys and sizes for one schema"
+timeout_seconds = 180
+max_output_bytes = 524288
+
+[[tools]]
+name = "migration-review"
+description = "Review a migration for locks, data loss, reversibility and unsafe operations"
+timeout_seconds = 180
+max_output_bytes = 262144
