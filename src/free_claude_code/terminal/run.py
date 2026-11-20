@@ -504,7 +504,18 @@ class RunEngine:
                 )
             if step.verify is not None:
                 check = self._verify(step, task_id)
-                if check.exit_code != step.verify.expect_exit:
+                verified = check.exit_code == step.verify.expect_exit
+                self._sink.record(
+                    make_event(
+                        "verified" if verified else "verification_failed",
+                        task_id,
+                        step.verify.argv,
+                        self._workspace,
+                        duration_seconds=check.duration_seconds,
+                        exit_code=check.exit_code,
+                    )
+                )
+                if not verified:
                     reports.append(
                         StepReport(
                             step.step_id,
