@@ -6,9 +6,10 @@ callback, enforces a wall-clock timeout with process-tree kill escalation, and
 supports cooperative cancellation through a threading.Event.
 
 Note on redaction: captured buffers are redacted as a whole, so secrets split
-across read chunks are caught in the final result. Live stream callbacks get
-per-chunk redaction - a secret split exactly across a chunk boundary could
-reach the callback; treat callbacks as progress display, not storage.
+across read chunks are caught in the final result. Live stream callbacks go
+through a stateful StreamRedactor that holds back a possible partial match at
+each chunk boundary, so a secret split across reads never reaches the callback
+in full either.
 """
 
 import contextlib
@@ -22,7 +23,11 @@ from typing import IO
 from free_claude_code.terminal import processes
 from free_claude_code.terminal.audit import AuditSink, NullAuditSink, make_event
 from free_claude_code.terminal.errors import PolicyRejectedError, SpawnError
-from free_claude_code.terminal.redaction import Redactor, default_redactor
+from free_claude_code.terminal.redaction import (
+    Redactor,
+    StreamRedactor,
+    default_redactor,
+)
 from free_claude_code.terminal.result import CommandResult, OutputChunk, _Capture
 from free_claude_code.terminal.spec import (
     DEFAULT_POLICY_DECISION,
@@ -198,6 +203,18 @@ class TerminalExecutor:
         started: float,
         on_output: OutputCallback | None,
     ) -> threading.Thread:
+        stream_redactor = StreamRedactor(self._redactor)
+
+        def emit(data: bytes) -> None:
+            if on_output is not None and data:
+                on_output(
+                    OutputChunk(
+                        stream=name,
+                        data=data,
+                        timestamp_offset_seconds=time.monotonic() - started,
+                    )
+                )
+
         def read() -> None:
             while True:
                 try:
@@ -205,18 +222,12 @@ class TerminalExecutor:
                 except OSError:
                     # PTY masters raise EIO once the child's slave side is
                     # gone; that is the pty end-of-stream.
-                    return
+                    break
                 if not chunk:
-                    return
+                    break
                 capture.append(chunk, spec.output_cap_bytes)
-                if on_output is not None:
-                    on_output(
-                        OutputChunk(
-                            stream=name,
-                            data=self._redactor.redact(chunk),
-                            timestamp_offset_seconds=time.monotonic() - started,
-                        )
-                    )
+                emit(stream_redactor.redact_chunk(chunk))
+            emit(stream_redactor.flush())
 
         thread = threading.Thread(target=read, name=f"fcc-terminal-{name}", daemon=True)
         thread.start()

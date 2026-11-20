@@ -53,7 +53,7 @@ from free_claude_code.terminal.policy import (
     RiskLevel,
     policy_config_from_env,
 )
-from free_claude_code.terminal.redaction import Redactor
+from free_claude_code.terminal.redaction import Redactor, StreamRedactor
 from free_claude_code.terminal.report import (
     append_run_record,
     load_run_history,
@@ -143,6 +143,7 @@ __all__ = [
     "ServiceInfo",
     "SpawnError",
     "StepReport",
+    "StreamRedactor",
     "SystemInspectError",
     "TerminalExecutor",
     "TerminalExecutorError",
