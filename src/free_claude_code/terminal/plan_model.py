@@ -27,6 +27,7 @@ _ENV_BASE_URL = "FCC_PLAN_BASE_URL"
 _ENV_MODEL = "FCC_PLAN_MODEL"
 _ENV_API_KEY = "FCC_PLAN_API_KEY"
 _ENV_TIMEOUT = "FCC_PLAN_TIMEOUT"
+_ENV_FALLBACKS = "FCC_PLAN_FALLBACKS"
 
 _DEFAULT_TIMEOUT = 120.0
 
@@ -98,10 +99,59 @@ class ChatCompletionsModel:
         return content
 
 
+class FallbackPlanModel:
+    """Try plan models in order until one answers (roadmap section 9).
+
+    A planner that dies with its endpoint is not gracefully degraded; it is
+    just down. Each leg is tried in turn on :class:`PlanModelError`; when
+    every leg fails, the raised error names each leg and its failure so the
+    operator sees the whole chain, not just the last error.
+    """
+
+    def __init__(self, legs: list[tuple[str, ChatCompletionsModel]]) -> None:
+        if not legs:
+            raise ValueError("FallbackPlanModel needs at least one leg")
+        self._legs = legs
+
+    def __call__(self, prompt: str) -> str:
+        failures: list[str] = []
+        for label, model in self._legs:
+            try:
+                return model(prompt)
+            except PlanModelError as exc:
+                failures.append(f"{label}: {exc}")
+        raise PlanModelError(
+            "all plan models failed -> " + " | ".join(failures)
+        ) from None
+
+
+def _parse_fallbacks(raw: str) -> list[tuple[str, str, str | None]]:
+    """Parse FCC_PLAN_FALLBACKS: ``base_url|model[|api_key]`` per comma entry."""
+
+    entries: list[tuple[str, str, str | None]] = []
+    for index, chunk in enumerate(raw.split(",")):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = [part.strip() for part in chunk.split("|")]
+        if len(parts) not in (2, 3) or not parts[0] or not parts[1]:
+            raise PlanModelError(
+                f"{_ENV_FALLBACKS} entry {index + 1} must be base_url|model"
+                f"[|api_key], got {chunk!r}"
+            )
+        api_key = (parts[2] or None) if len(parts) == 3 else None
+        entries.append((parts[0], parts[1], api_key))
+    return entries
+
+
 def plan_model_from_env(
     environ: Mapping[str, str] | None = None,
-) -> ChatCompletionsModel:
-    """Build the adapter from FCC_PLAN_* variables, or say what is missing."""
+) -> ChatCompletionsModel | FallbackPlanModel:
+    """Build the adapter from FCC_PLAN_* variables, or say what is missing.
+
+    With FCC_PLAN_FALLBACKS set, the primary is tried first and each
+    fallback in order; without it, the primary adapter is returned alone.
+    """
 
     env = os.environ if environ is None else environ
     missing = [name for name in (_ENV_BASE_URL, _ENV_MODEL) if not env.get(name)]
@@ -122,12 +172,29 @@ def plan_model_from_env(
             ) from None
         if timeout <= 0:
             raise PlanModelError(f"{_ENV_TIMEOUT} must be positive")
-    return ChatCompletionsModel(
+    primary = ChatCompletionsModel(
         base_url=env[_ENV_BASE_URL],
         model=env[_ENV_MODEL],
         api_key=env.get(_ENV_API_KEY) or None,
         timeout=timeout,
     )
+    raw_fallbacks = env.get(_ENV_FALLBACKS, "").strip()
+    if not raw_fallbacks:
+        return primary
+    legs: list[tuple[str, ChatCompletionsModel]] = [(env[_ENV_MODEL], primary)]
+    for base_url, model_name, api_key in _parse_fallbacks(raw_fallbacks):
+        legs.append(
+            (
+                model_name,
+                ChatCompletionsModel(
+                    base_url=base_url,
+                    model=model_name,
+                    api_key=api_key,
+                    timeout=timeout,
+                ),
+            )
+        )
+    return FallbackPlanModel(legs)
 
 
 def propose_plan_with_feedback(

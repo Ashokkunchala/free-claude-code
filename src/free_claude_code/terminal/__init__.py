@@ -36,6 +36,7 @@ from free_claude_code.terminal.plan_gen import (
 )
 from free_claude_code.terminal.plan_model import (
     ChatCompletionsModel,
+    FallbackPlanModel,
     PlanModelError,
     plan_model_from_env,
     propose_plan_with_feedback,
@@ -107,6 +108,7 @@ __all__ = [
     "CommandScheduler",
     "CommandSpec",
     "EnvContext",
+    "FallbackPlanModel",
     "FileApprovalStore",
     "InMemoryAuditSink",
     "JsonlAuditSink",
