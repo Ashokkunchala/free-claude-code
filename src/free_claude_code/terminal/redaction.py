@@ -82,3 +82,72 @@ def default_redactor() -> Redactor:
     """Shape-only redactor for call sites without settings access."""
 
     return Redactor()
+
+
+#: Longest token anchor plus the minimum trailing run a token pattern needs
+#: before it can match ("Bearer " + 19 chars is the worst case below).
+_ANCHOR_PREFIXES: tuple[bytes, ...] = (
+    b"sk-",
+    b"gsk_",
+    b"nvapi-",
+    b"ghp_",
+    b"gho_",
+    b"ghu_",
+    b"ghs_",
+    b"ghr_",
+    b"Bearer ",
+)
+_TOKEN_MIN_TAIL = 20
+
+
+def _carry_length(secret_lengths: Iterable[int]) -> int:
+    """Bytes a streaming redactor must hold back to catch split matches.
+
+    A configured secret split across a chunk boundary leaves a partial of at
+    most ``len(secret) - 1`` bytes in the earlier chunk. A token shape leaves
+    a non-matching partial of at most ``len(anchor) + _TOKEN_MIN_TAIL - 1``
+    bytes (one more character and the pattern would already match, so the
+    whole-buffer redaction would have caught it).
+    """
+
+    carry = max(len(anchor) + _TOKEN_MIN_TAIL - 1 for anchor in _ANCHOR_PREFIXES)
+    for length in secret_lengths:
+        carry = max(carry, length - 1)
+    return carry
+
+
+class StreamRedactor:
+    """Stateful redactor for chunked output streams.
+
+    Holds back a tail that could be the start of a secret or token and
+    redacts it together with the next chunk, so a secret split across read
+    chunks never reaches the consumer in full. ``flush`` emits the final
+    held-back tail at end of stream.
+    """
+
+    def __init__(self, redactor: Redactor) -> None:
+        self._redactor = redactor
+        self._carry_len = _carry_length(len(s) for s in redactor._secrets)
+        self._carry = b""
+
+    def redact_chunk(self, data: bytes) -> bytes:
+        """Redact one chunk; may return fewer bytes than given (tail held)."""
+
+        # Redact first, then hold back the tail: a partial secret or token
+        # that only the next chunk completes can only sit at the end of the
+        # buffer, and complete matches are already replaced, so the emitted
+        # prefix never contains secret bytes. The held tail is already
+        # redacted; re-redacting it with the next chunk is harmless.
+        buf = self._redactor.redact(self._carry + data)
+        if len(buf) <= self._carry_len:
+            self._carry = buf
+            return b""
+        self._carry = buf[-self._carry_len :]
+        return buf[: -self._carry_len]
+
+    def flush(self) -> bytes:
+        """Emit the held-back tail at end of stream."""
+
+        out = self._redactor.redact(self._carry)
+        self._carry = b""
+        return out
