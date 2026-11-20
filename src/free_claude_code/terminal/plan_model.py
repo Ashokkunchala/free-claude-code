@@ -30,6 +30,7 @@ _ENV_MODEL = "FCC_PLAN_MODEL"
 _ENV_API_KEY = "FCC_PLAN_API_KEY"
 _ENV_TIMEOUT = "FCC_PLAN_TIMEOUT"
 _ENV_FALLBACKS = "FCC_PLAN_FALLBACKS"
+_ENV_PROFILES = "FCC_PLAN_PROFILES"
 
 _DEFAULT_TIMEOUT = 120.0
 
@@ -201,6 +202,65 @@ class FallbackPlanModel:
         raise PlanModelError(message) from None
 
 
+class SelectingPlanModel:
+    """Route each call to a pool leg by prompt size and availability.
+
+    Roadmap section 9: provider/model selection based on task needs,
+    context size, latency and availability. Each leg declares a context
+    budget in characters; a call goes to the smallest-budget leg that
+    still fits the prompt, which steers small prompts to small, fast or
+    local models and large prompts to large-context endpoints. A leg
+    without a budget fits anything and ranks last. On
+    :class:`PlanModelError` the call falls through to the next fitting
+    leg; when every fitting leg fails, the raised error names each
+    attempt, and an all-rate-limited failure surfaces as
+    :class:`PlanModelRateLimitError` with the earliest honest backoff.
+    """
+
+    def __init__(
+        self, legs: list[tuple[str, int | None, ChatCompletionsModel]]
+    ) -> None:
+        if not legs:
+            raise ValueError("SelectingPlanModel needs at least one leg")
+        self._legs = legs
+
+    def __call__(self, prompt: str) -> str:
+        fitting = [
+            (label, model)
+            for label, budget, model in sorted(
+                self._legs,
+                key=lambda leg: (leg[1] is None, leg[1] if leg[1] is not None else 0),
+            )
+            if budget is None or budget >= len(prompt)
+        ]
+        failures: list[str] = []
+        every_leg_rate_limited = True
+        retry_hints: list[float] = []
+        for label, model in fitting:
+            try:
+                return model(prompt)
+            except PlanModelError as exc:
+                failures.append(f"{label}: {exc}")
+                if isinstance(exc, PlanModelRateLimitError):
+                    if exc.retry_after is not None:
+                        retry_hints.append(exc.retry_after)
+                else:
+                    every_leg_rate_limited = False
+        if not fitting:
+            raise PlanModelError(
+                "no plan model profile fits a prompt of "
+                f"{len(prompt)} characters; raise a profile budget in "
+                f"{_ENV_PROFILES} or add an unbounded leg"
+            ) from None
+        message = "all plan model profiles failed -> " + " | ".join(failures)
+        if every_leg_rate_limited:
+            raise PlanModelRateLimitError(
+                message,
+                retry_after=min(retry_hints) if retry_hints else None,
+            ) from None
+        raise PlanModelError(message) from None
+
+
 def _parse_fallbacks(raw: str) -> list[tuple[str, str, str | None]]:
     """Parse FCC_PLAN_FALLBACKS: ``base_url|model[|api_key]`` per comma entry."""
 
@@ -220,18 +280,91 @@ def _parse_fallbacks(raw: str) -> list[tuple[str, str, str | None]]:
     return entries
 
 
+def _parse_profiles(raw: str) -> list[tuple[str, str, str, str | None, int | None]]:
+    """Parse FCC_PLAN_PROFILES entries.
+
+    Semicolon-separated ``label=base_url|model|budget[|api_key]`` entries,
+    where ``budget`` is the context size in characters the leg accepts, or
+    ``unbounded`` for no limit. Base URLs accept the same local aliases as
+    the primary config.
+    """
+
+    entries: list[tuple[str, str, str, str | None, int | None]] = []
+    for index, chunk in enumerate(raw.split(";")):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        label, sep, rest = chunk.partition("=")
+        label = label.strip()
+        if not sep or not label:
+            raise PlanModelError(
+                f"{_ENV_PROFILES} entry {index + 1} must be "
+                f"label=base_url|model|budget[|api_key], got {chunk!r}"
+            )
+        parts = [part.strip() for part in rest.split("|")]
+        if len(parts) not in (3, 4) or not parts[0] or not parts[1] or not parts[2]:
+            raise PlanModelError(
+                f"{_ENV_PROFILES} entry {index + 1} must be "
+                f"label=base_url|model|budget[|api_key], got {chunk!r}"
+            )
+        budget: int | None
+        if parts[2].lower() == "unbounded":
+            budget = None
+        else:
+            try:
+                budget = int(parts[2])
+            except ValueError:
+                raise PlanModelError(
+                    f"{_ENV_PROFILES} entry {index + 1} budget must be a "
+                    f"character count or 'unbounded', got {parts[2]!r}"
+                ) from None
+            if budget <= 0:
+                raise PlanModelError(
+                    f"{_ENV_PROFILES} entry {index + 1} budget must be positive"
+                )
+        api_key = (parts[3] or None) if len(parts) == 4 else None
+        entries.append((label, _resolve_base_url(parts[0]), parts[1], api_key, budget))
+    if not entries:
+        raise PlanModelError(f"{_ENV_PROFILES} is set but has no usable entries")
+    return entries
+
+
 def plan_model_from_env(
     environ: Mapping[str, str] | None = None,
-) -> ChatCompletionsModel | FallbackPlanModel:
+) -> ChatCompletionsModel | FallbackPlanModel | SelectingPlanModel:
     """Build the adapter from FCC_PLAN_* variables, or say what is missing.
 
     With FCC_PLAN_FALLBACKS set, the primary is tried first and each
     fallback in order; without it, the primary adapter is returned alone.
     A base URL may be a local-model alias ("ollama") for offline/private
     planning against a local server.
+
+    With FCC_PLAN_PROFILES set, the pool replaces the primary config: a
+    SelectingPlanModel routes each call by prompt size and availability
+    (roadmap section 9), and FCC_PLAN_BASE_URL/FCC_PLAN_MODEL are not
+    required.
     """
 
     env = os.environ if environ is None else environ
+    raw_profiles = env.get(_ENV_PROFILES, "").strip()
+    if raw_profiles:
+        timeout = _env_timeout(env)
+        legs: list[tuple[str, int | None, ChatCompletionsModel]] = [
+            (
+                label,
+                budget,
+                ChatCompletionsModel(
+                    base_url=base_url,
+                    model=model_name,
+                    api_key=api_key,
+                    timeout=timeout,
+                ),
+            )
+            for label, base_url, model_name, api_key, budget in _parse_profiles(
+                raw_profiles
+            )
+        ]
+        return SelectingPlanModel(legs)
     missing = [name for name in (_ENV_BASE_URL, _ENV_MODEL) if not env.get(name)]
     if missing:
         raise PlanModelError(
@@ -239,17 +372,7 @@ def plan_model_from_env(
             + " and ".join(missing)
             + " (OpenAI-compatible endpoint)"
         )
-    raw_timeout = env.get(_ENV_TIMEOUT, "")
-    timeout = _DEFAULT_TIMEOUT
-    if raw_timeout:
-        try:
-            timeout = float(raw_timeout)
-        except ValueError:
-            raise PlanModelError(
-                f"{_ENV_TIMEOUT} must be a number, got {raw_timeout!r}"
-            ) from None
-        if timeout <= 0:
-            raise PlanModelError(f"{_ENV_TIMEOUT} must be positive")
+    timeout = _env_timeout(env)
     primary = ChatCompletionsModel(
         base_url=_resolve_base_url(env[_ENV_BASE_URL]),
         model=env[_ENV_MODEL],
@@ -273,6 +396,21 @@ def plan_model_from_env(
             )
         )
     return FallbackPlanModel(legs)
+
+
+def _env_timeout(env: Mapping[str, str]) -> float:
+    raw_timeout = env.get(_ENV_TIMEOUT, "")
+    timeout = _DEFAULT_TIMEOUT
+    if raw_timeout:
+        try:
+            timeout = float(raw_timeout)
+        except ValueError:
+            raise PlanModelError(
+                f"{_ENV_TIMEOUT} must be a number, got {raw_timeout!r}"
+            ) from None
+        if timeout <= 0:
+            raise PlanModelError(f"{_ENV_TIMEOUT} must be positive")
+    return timeout
 
 
 def propose_plan_with_feedback(
