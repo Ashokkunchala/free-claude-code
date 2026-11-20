@@ -49,6 +49,7 @@ class FakeExecutor(TerminalExecutor):
         cancel_event: threading.Event | None = None,
         on_output: object = None,
         task_id: str | None = None,
+        allow_pty: bool = False,
     ) -> CommandResult:
         self.specs.append(spec)
         return self._results.pop(0)
@@ -161,6 +162,7 @@ def test_round_task_ids_scoped(repo: Path) -> None:
             cancel_event: threading.Event | None = None,
             on_output: object = None,
             task_id: str | None = None,
+            allow_pty: bool = False,
         ) -> CommandResult:
             task_ids.append(task_id)
             return super().run(

@@ -55,7 +55,14 @@ class TerminalExecutor:
         cancel_event: threading.Event | None = None,
         on_output: OutputCallback | None = None,
         task_id: str | None = None,
+        allow_pty: bool = False,
     ) -> CommandResult:
+        """Run one command; ``allow_pty`` gates ``spec.pty`` to interactive call sites.
+
+        With a pty the child's stdout and stderr arrive merged: the result
+        carries everything in ``stdout`` and ``stderr`` stays empty.
+        """
+
         task = task_id if task_id is not None else uuid.uuid4().hex
         if not policy.allowed:
             self._sink.record(
@@ -73,6 +80,7 @@ class TerminalExecutor:
             make_event("planned", task, spec.argv, spec.cwd, policy_id=policy.policy_id)
         )
         started = time.monotonic()
+        use_pty = spec.pty and allow_pty and not spec.inherit_stdio
         try:
             process = processes.spawn(
                 spec.argv,
@@ -82,6 +90,7 @@ class TerminalExecutor:
                 isolated=spec.isolated,
                 max_cpu_seconds=spec.max_cpu_seconds,
                 max_memory_bytes=spec.max_memory_bytes,
+                pty=use_pty,
             )
         except (OSError, ValueError) as exc:
             self._sink.record(
@@ -98,7 +107,8 @@ class TerminalExecutor:
         stderr_capture = _Capture()
         readers: list[threading.Thread] = []
         if not spec.inherit_stdio:
-            if process.stdout is None or process.stderr is None:
+            pty_active = use_pty and processes.pty_supported()
+            if process.stdout is None or (process.stderr is None and not pty_active):
                 processes.kill_tree(process)
                 processes.untrack(process)
                 self._sink.record(
@@ -110,11 +120,20 @@ class TerminalExecutor:
             readers = [
                 self._start_reader(
                     process.stdout, "stdout", stdout_capture, spec, started, on_output
-                ),
-                self._start_reader(
-                    process.stderr, "stderr", stderr_capture, spec, started, on_output
-                ),
+                )
             ]
+            if not pty_active:
+                assert process.stderr is not None
+                readers.append(
+                    self._start_reader(
+                        process.stderr,
+                        "stderr",
+                        stderr_capture,
+                        spec,
+                        started,
+                        on_output,
+                    )
+                )
 
         timed_out = False
         cancelled = False
@@ -174,7 +193,12 @@ class TerminalExecutor:
     ) -> threading.Thread:
         def read() -> None:
             while True:
-                chunk = stream.read(_READ_CHUNK_BYTES)
+                try:
+                    chunk = stream.read(_READ_CHUNK_BYTES)
+                except OSError:
+                    # PTY masters raise EIO once the child's slave side is
+                    # gone; that is the pty end-of-stream.
+                    return
                 if not chunk:
                     return
                 capture.append(chunk, spec.output_cap_bytes)

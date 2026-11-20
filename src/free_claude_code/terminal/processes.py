@@ -26,6 +26,12 @@ _lock = threading.Lock()
 _tracked: dict[int, subprocess.Popen[bytes]] = {}
 
 
+def pty_supported() -> bool:
+    """PTY allocation uses the stdlib pty module, which is POSIX-only."""
+
+    return os.name != "nt"
+
+
 def spawn(
     argv: Sequence[str],
     *,
@@ -37,6 +43,7 @@ def spawn(
     max_cpu_seconds: float | None = None,
     max_memory_bytes: int | None = None,
     pipe_stdin: bool = False,
+    pty: bool = False,
 ) -> subprocess.Popen[bytes]:
     """Start a child process.
 
@@ -48,7 +55,11 @@ def spawn(
     the executor's orphan-sweep table; callers managing their own lifecycle
     (launchers, detached servers) opt out. ``max_cpu_seconds`` /
     ``max_memory_bytes`` cap the child's CPU time and address space via POSIX
-    rlimits; both are a no-op on Windows.
+    rlimits; both are a no-op on Windows. ``pty`` allocates a pseudo-terminal
+    (POSIX only, ignored with ``inherit_stdio``): the child's stdin/stdout/
+    stderr all attach to the slave end and the parent's master is exposed as
+    ``process.stdout`` with ``process.stderr`` set to None, so output arrives
+    merged on one stream.
     """
 
     kwargs: dict[str, Any] = {}
@@ -56,10 +67,20 @@ def spawn(
         kwargs["cwd"] = cwd
     if env is not None:
         kwargs["env"] = dict(env)
-    if not inherit_stdio:
+    master_fd: int | None = None
+    slave_fd: int | None = None
+    use_pty = pty and not inherit_stdio and pty_supported()
+    if use_pty:
+        import pty as pty_module
+
+        master_fd, slave_fd = pty_module.openpty()
+        kwargs["stdin"] = slave_fd
+        kwargs["stdout"] = slave_fd
+        kwargs["stderr"] = slave_fd
+    elif not inherit_stdio:
         kwargs["stdout"] = subprocess.PIPE
         kwargs["stderr"] = subprocess.PIPE
-    if pipe_stdin:
+    if pipe_stdin and not use_pty:
         kwargs["stdin"] = subprocess.PIPE
     if isolated:
         if os.name == "nt":
@@ -71,7 +92,20 @@ def spawn(
     preexec = _make_limit_preexec(max_cpu_seconds, max_memory_bytes)
     if preexec is not None:
         kwargs["preexec_fn"] = preexec
-    process = cast("subprocess.Popen[bytes]", subprocess.Popen(argv, **kwargs))
+    try:
+        process = cast("subprocess.Popen[bytes]", subprocess.Popen(argv, **kwargs))
+    except BaseException:
+        for fd in (master_fd, slave_fd):
+            if fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+        raise
+    if master_fd is not None:
+        if slave_fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(slave_fd)
+        process.stdout = os.fdopen(master_fd, "rb", buffering=0)
+        process.stderr = None
     if track and process.pid:
         with _lock:
             _tracked[process.pid] = process
