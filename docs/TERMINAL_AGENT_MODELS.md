@@ -51,3 +51,27 @@ says so plainly ("rate limited or out of quota") and reports the
 provider's Retry-After hint when one was given. If every leg of a
 fallback chain is throttled, the error reports the earliest hinted
 backoff.
+
+## Model pools by task needs
+
+`FCC_PLAN_PROFILES` replaces the primary config with a named pool, so each
+call is routed by prompt size and availability (roadmap section 9). Entries
+are semicolon-separated `label=base_url|model|budget[|api_key]`, where
+`budget` is the prompt size in characters the leg accepts, or `unbounded`:
+
+```sh
+export FCC_PLAN_PROFILES="fast=ollama|qwen2.5-coder|8000; deep=https://api.example.com/v1|planner-2|unbounded|token"
+```
+
+A call goes to the smallest-budget leg that fits the prompt: small prompts
+stay on the small, fast or local model, large prompts route to the
+large-context endpoint, and an unbounded leg catches anything. A leg that
+fails (including rate limits) falls through to the next fitting leg; when
+every fitting leg fails, the error names each attempt, and an
+all-rate-limited failure reports the earliest hinted backoff. A prompt
+that fits no leg fails honestly and says to raise a budget or add an
+unbounded leg.
+
+When `FCC_PLAN_PROFILES` is set, `FCC_PLAN_BASE_URL` and `FCC_PLAN_MODEL`
+are not required; `FCC_PLAN_TIMEOUT` applies to every leg, and base URLs
+accept the same local aliases (`ollama`).
