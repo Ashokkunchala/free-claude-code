@@ -112,3 +112,118 @@ def test_feedback_retry_raises_last_plan_error():
 
     with pytest.raises(PlanError):
         propose_plan_with_feedback("list files", model, attempts=2)
+
+
+def _fail_transport(url, payload, headers, timeout):
+    raise PlanModelError(f"plan model endpoint unreachable: {url}")
+
+
+def test_fallback_uses_next_leg_after_failure():
+    from free_claude_code.terminal.plan_model import FallbackPlanModel
+
+    primary = ChatCompletionsModel(
+        base_url="http://down.test/v1",
+        model="planner-1",
+        transport=_fail_transport,
+    )
+    backup = ChatCompletionsModel(
+        base_url="http://model.test/v1",
+        model="planner-2",
+        api_key="secret-key",
+        transport=transport_ok,
+    )
+    model = FallbackPlanModel([("planner-1", primary), ("planner-2", backup)])
+    assert json.loads(model("plan this")) == _PLAN
+
+
+def test_fallback_error_names_every_leg():
+    from free_claude_code.terminal.plan_model import FallbackPlanModel
+
+    model = FallbackPlanModel(
+        [
+            (
+                "planner-1",
+                ChatCompletionsModel(
+                    base_url="http://down-a.test/v1",
+                    model="planner-1",
+                    transport=_fail_transport,
+                ),
+            ),
+            (
+                "planner-2",
+                ChatCompletionsModel(
+                    base_url="http://down-b.test/v1",
+                    model="planner-2",
+                    transport=_fail_transport,
+                ),
+            ),
+        ]
+    )
+    with pytest.raises(PlanModelError) as excinfo:
+        model("plan this")
+    message = str(excinfo.value)
+    assert "all plan models failed" in message
+    assert "planner-1" in message and "down-a.test" in message
+    assert "planner-2" in message and "down-b.test" in message
+
+
+def test_from_env_returns_primary_alone_without_fallbacks():
+    model = plan_model_from_env(_ENV)
+    assert isinstance(model, ChatCompletionsModel)
+
+
+def test_from_env_builds_fallback_chain():
+    from free_claude_code.terminal.plan_model import FallbackPlanModel
+
+    model = plan_model_from_env(
+        {
+            **_ENV,
+            "FCC_PLAN_FALLBACKS": "http://local.test/v1|llama-local, "
+            "http://other.test/v1 | qwen-backup | other-key",
+        }
+    )
+    assert isinstance(model, FallbackPlanModel)
+
+
+def test_from_env_fallback_chain_actually_fails_over():
+    from free_claude_code.terminal.plan_model import FallbackPlanModel
+
+    real_transport = ChatCompletionsModel.__init__
+
+    def route_aware_init(
+        self, *, base_url, model, api_key=None, timeout=120.0, transport=None
+    ):
+        chosen = _fail_transport if "down" in base_url else transport_ok
+        real_transport(
+            self,
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            timeout=timeout,
+            transport=chosen,
+        )
+
+    original = ChatCompletionsModel.__init__
+    ChatCompletionsModel.__init__ = route_aware_init
+    try:
+        model = plan_model_from_env(
+            {
+                "FCC_PLAN_BASE_URL": "http://down.test/v1",
+                "FCC_PLAN_MODEL": "planner-1",
+                "FCC_PLAN_FALLBACKS": "http://model.test/v1|planner-2|secret-key",
+            }
+        )
+        assert isinstance(model, FallbackPlanModel)
+        assert json.loads(model("plan this")) == _PLAN
+    finally:
+        ChatCompletionsModel.__init__ = original
+
+
+def test_from_env_rejects_bad_fallback_entry():
+    with pytest.raises(PlanModelError, match="FCC_PLAN_FALLBACKS entry 2"):
+        plan_model_from_env(
+            {
+                **_ENV,
+                "FCC_PLAN_FALLBACKS": "http://a.test/v1|ok-model, missing-model-only",
+            }
+        )
