@@ -227,3 +227,156 @@ def test_from_env_rejects_bad_fallback_entry():
                 "FCC_PLAN_FALLBACKS": "http://a.test/v1|ok-model, missing-model-only",
             }
         )
+
+
+def _http_error(code, body=b"", retry_after=None):
+    import email.message
+    import io
+    import urllib.error
+
+    headers = email.message.Message()
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return urllib.error.HTTPError(
+        "http://model.test/v1/chat/completions",
+        code,
+        "error",
+        headers,
+        io.BytesIO(body),
+    )
+
+
+def test_transport_429_raises_rate_limit_with_retry_hint(monkeypatch):
+    import urllib.request
+
+    from free_claude_code.terminal.plan_model import PlanModelRateLimitError
+
+    def fake_urlopen(request, timeout):
+        raise _http_error(429, b'{"error": "slow down"}', retry_after="30")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    model = ChatCompletionsModel(base_url="http://model.test/v1", model="m")
+    with pytest.raises(PlanModelRateLimitError) as excinfo:
+        model("p")
+    assert excinfo.value.retry_after == 30.0
+    message = str(excinfo.value)
+    assert "rate limited or out of quota" in message
+    assert "30s backoff" in message
+    assert "slow down" in message
+
+
+def test_transport_429_without_hint_says_so(monkeypatch):
+    import urllib.request
+
+    from free_claude_code.terminal.plan_model import PlanModelRateLimitError
+
+    def fake_urlopen(request, timeout):
+        raise _http_error(429, b"quota exceeded")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    model = ChatCompletionsModel(base_url="http://model.test/v1", model="m")
+    with pytest.raises(PlanModelRateLimitError) as excinfo:
+        model("p")
+    assert excinfo.value.retry_after is None
+    assert "no retry hint" in str(excinfo.value)
+
+
+def test_transport_429_parses_http_date_hint(monkeypatch):
+    import urllib.request
+
+    from free_claude_code.terminal.plan_model import PlanModelRateLimitError
+
+    def fake_urlopen(request, timeout):
+        raise _http_error(429, retry_after="Fri, 01 Jan 2038 00:00:00 GMT")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    model = ChatCompletionsModel(base_url="http://model.test/v1", model="m")
+    with pytest.raises(PlanModelRateLimitError) as excinfo:
+        model("p")
+    assert excinfo.value.retry_after is not None
+    assert excinfo.value.retry_after > 0
+
+
+def test_transport_non_429_stays_plain_error(monkeypatch):
+    import urllib.request
+
+    from free_claude_code.terminal.plan_model import PlanModelRateLimitError
+
+    def fake_urlopen(request, timeout):
+        raise _http_error(500, b"boom")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    model = ChatCompletionsModel(base_url="http://model.test/v1", model="m")
+    with pytest.raises(PlanModelError) as excinfo:
+        model("p")
+    assert not isinstance(excinfo.value, PlanModelRateLimitError)
+    assert "HTTP 500" in str(excinfo.value)
+
+
+def test_fallback_all_rate_limited_raises_rate_limit_with_earliest_hint():
+    from free_claude_code.terminal.plan_model import (
+        FallbackPlanModel,
+        PlanModelRateLimitError,
+    )
+
+    def limited(seconds):
+        def transport(url, payload, headers, timeout):
+            raise PlanModelRateLimitError("throttled", retry_after=seconds)
+
+        return transport
+
+    model = FallbackPlanModel(
+        [
+            (
+                "planner-1",
+                ChatCompletionsModel(
+                    base_url="http://a.test/v1", model="p1", transport=limited(30.0)
+                ),
+            ),
+            (
+                "planner-2",
+                ChatCompletionsModel(
+                    base_url="http://b.test/v1", model="p2", transport=limited(10.0)
+                ),
+            ),
+        ]
+    )
+    with pytest.raises(PlanModelRateLimitError) as excinfo:
+        model("plan this")
+    assert excinfo.value.retry_after == 10.0
+    message = str(excinfo.value)
+    assert "all plan models failed" in message
+    assert "planner-1" in message and "planner-2" in message
+
+
+def test_fallback_mixed_failures_stay_plain_error():
+    from free_claude_code.terminal.plan_model import (
+        FallbackPlanModel,
+        PlanModelRateLimitError,
+    )
+
+    def limited(url, payload, headers, timeout):
+        raise PlanModelRateLimitError("throttled", retry_after=5.0)
+
+    model = FallbackPlanModel(
+        [
+            (
+                "planner-1",
+                ChatCompletionsModel(
+                    base_url="http://a.test/v1", model="p1", transport=limited
+                ),
+            ),
+            (
+                "planner-2",
+                ChatCompletionsModel(
+                    base_url="http://down.test/v1",
+                    model="p2",
+                    transport=_fail_transport,
+                ),
+            ),
+        ]
+    )
+    with pytest.raises(PlanModelError) as excinfo:
+        model("plan this")
+    assert type(excinfo.value) is PlanModelError
+    assert "planner-1" in str(excinfo.value) and "planner-2" in str(excinfo.value)
