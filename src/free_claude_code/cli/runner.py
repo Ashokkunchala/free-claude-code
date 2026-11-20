@@ -125,9 +125,13 @@ def _run(
     task_id: str,
     approved: bool,
     as_json: bool,
+    allow_pty: bool = False,
 ) -> int:
     result = executor.run(
-        spec, policy=verdict.to_decision(approved=approved), task_id=task_id
+        spec,
+        policy=verdict.to_decision(approved=approved),
+        task_id=task_id,
+        allow_pty=allow_pty,
     )
     _print_result(result, as_json=as_json)
     if result.timed_out:
@@ -163,6 +167,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="Wall-clock timeout in seconds (default 300)",
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON result")
+    parser.add_argument(
+        "--pty",
+        action="store_true",
+        help=(
+            "Allocate a pseudo-terminal for the command (POSIX only): for "
+            "explicitly interactive programs that need a real terminal. "
+            "Output arrives merged on stdout."
+        ),
+    )
     parser.add_argument("--approvals-file", type=Path, default=None)
     parser.add_argument("--secret-file", type=Path, default=None)
     parser.add_argument("--audit-file", type=Path, default=None)
@@ -185,6 +198,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             argv=tuple(command),
             cwd=str(workspace),
             timeout_seconds=args.timeout,
+            pty=args.pty,
         )
     except ValueError as exc:
         print(f"fcc-exec: {exc}", file=sys.stderr)
@@ -210,6 +224,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 task_id=task_id,
                 approved=False,
                 as_json=args.json,
+                allow_pty=args.pty,
             )
         )
 
@@ -240,6 +255,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 task_id=task_id,
                 approved=True,
                 as_json=args.json,
+                allow_pty=args.pty,
             )
         )
 
