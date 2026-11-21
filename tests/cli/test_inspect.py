@@ -376,3 +376,101 @@ def test_toolchain_text(tmp_path: Path, capsys) -> None:
     main(["--workspace", str(tmp_path), "toolchain"])
     out = capsys.readouterr().out
     assert "docker" in out
+
+
+def _fake_runtimes():
+    from free_claude_code.terminal import ToolInfo
+
+    return [
+        ToolInfo(
+            name="node",
+            path="/usr/bin/node",
+            version="22.11.0",
+            install_hint=None,
+        ),
+        ToolInfo(
+            name="go",
+            path=None,
+            version=None,
+            install_hint="install go",
+        ),
+    ]
+
+
+def test_runtimes_plain(workspace: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "free_claude_code.cli.inspect.collect_runtimes", lambda: _fake_runtimes()
+    )
+    run(["--workspace", str(workspace), "runtimes"])
+    out = capsys.readouterr().out
+    assert "node" in out
+    assert "22.11.0" in out
+    assert "install go" in out
+
+
+def test_runtimes_json(workspace: Path, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "free_claude_code.cli.inspect.collect_runtimes", lambda: _fake_runtimes()
+    )
+    run(["--workspace", str(workspace), "--json", "runtimes"])
+    payload = json.loads(capsys.readouterr().out)
+    names = {tool["name"] for tool in payload["tools"]}
+    assert {"node", "go"} == names
+
+
+def _fake_resources():
+    from free_claude_code.terminal import CpuInfo, DiskInfo, MemoryInfo
+
+    disk = DiskInfo(
+        mount="/",
+        total_bytes=100 * 1024**2,
+        used_bytes=25 * 1024**2,
+        available_bytes=75 * 1024**2,
+    )
+    memory = MemoryInfo(total_bytes=16 * 1024**3, available_bytes=8 * 1024**3)
+    cpu = CpuInfo(logical_cores=8, load_1m=0.5, load_5m=0.25, load_15m=0.1)
+    return disk, memory, cpu
+
+
+def test_resources_plain(workspace: Path, capsys, monkeypatch) -> None:
+    disk, memory, cpu = _fake_resources()
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_disk", lambda: [disk])
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_memory", lambda: memory)
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_cpu", lambda: cpu)
+    run(["--workspace", str(workspace), "resources"])
+    out = capsys.readouterr().out
+    assert "75MB free of 100MB" in out
+    assert "8.0GB available of 16.0GB" in out
+    assert "8 cores" in out
+
+
+def test_resources_json(workspace: Path, capsys, monkeypatch) -> None:
+    disk, memory, cpu = _fake_resources()
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_disk", lambda: [disk])
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_memory", lambda: memory)
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_cpu", lambda: cpu)
+    run(["--workspace", str(workspace), "--json", "resources"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["disks"][0]["mount"] == "/"
+    assert payload["memory"]["total_bytes"] == 16 * 1024**3
+    assert payload["cpu"]["logical_cores"] == 8
+
+
+def test_resources_section_failure_degrades(
+    workspace: Path, capsys, monkeypatch
+) -> None:
+    from free_claude_code.terminal import SystemInspectError
+
+    disk, _, cpu = _fake_resources()
+
+    def boom():
+        raise SystemInspectError("'vm_stat' is not installed on this system")
+
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_disk", lambda: [disk])
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_memory", boom)
+    monkeypatch.setattr("free_claude_code.cli.inspect.collect_cpu", lambda: cpu)
+    run(["--workspace", str(workspace), "resources"])
+    out = capsys.readouterr().out
+    assert "75MB free of 100MB" in out
+    assert "unavailable" in out
+    assert "vm_stat" in out

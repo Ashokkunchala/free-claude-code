@@ -29,6 +29,9 @@ class EnvContext:
     git_branch: str | None
     git_dirty: tuple[str, ...] = ()
     top_level: tuple[str, ...] = ()
+    terminal: str | None = None
+    repo_root: str | None = None
+    path_entries: int = 0
 
 
 def _probe(argv: list[str], cwd: str) -> str | None:
@@ -72,6 +75,22 @@ def _top_level(workspace: str) -> tuple[str, ...]:
     return tuple(entries)
 
 
+def _git_root(workspace: str) -> str | None:
+    out = _probe(["git", "rev-parse", "--show-toplevel"], workspace)
+    if out is None:
+        return None
+    return out.strip() or None
+
+
+def _terminal() -> str | None:
+    return os.environ.get("TERM_PROGRAM") or os.environ.get("TERM")
+
+
+def _path_entry_count() -> int:
+    path = os.environ.get("PATH", "")
+    return len([entry for entry in path.split(os.pathsep) if entry])
+
+
 def collect_env_context(workspace: str) -> EnvContext:
     """Collect the bounded context; never raises on missing tools."""
 
@@ -83,6 +102,9 @@ def collect_env_context(workspace: str) -> EnvContext:
         git_branch=_git_branch(workspace),
         git_dirty=_git_dirty(workspace),
         top_level=_top_level(workspace),
+        terminal=_terminal(),
+        repo_root=_git_root(workspace),
+        path_entries=_path_entry_count(),
     )
 
 
@@ -95,6 +117,12 @@ def render_env_context(context: EnvContext) -> str:
     ]
     if context.shell:
         lines.append(f"Shell: {context.shell}")
+    if context.terminal:
+        lines.append(f"Terminal: {context.terminal}")
+    if context.path_entries:
+        lines.append(f"PATH entries: {context.path_entries}")
+    if context.repo_root:
+        lines.append(f"Git root: {context.repo_root}")
     if context.git_branch:
         lines.append(f"Git branch: {context.git_branch}")
     if context.git_dirty:

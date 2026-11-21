@@ -12,7 +12,10 @@ redactor before leaving this module. A missing tool degrades to a clear
 """
 
 import csv
+import os
 import platform
+import re
+import shutil
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
@@ -57,6 +60,34 @@ class ServiceInfo:
     name: str
     state: str
     description: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class DiskInfo:
+    """One mounted filesystem's capacity."""
+
+    mount: str
+    total_bytes: int
+    used_bytes: int
+    available_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryInfo:
+    """Physical memory total and what is currently available."""
+
+    total_bytes: int
+    available_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class CpuInfo:
+    """Logical core count and load averages (None where the OS hides them)."""
+
+    logical_cores: int | None
+    load_1m: float | None
+    load_5m: float | None
+    load_15m: float | None
 
 
 def _default_runner(argv: list[str]) -> str:
@@ -384,6 +415,224 @@ def collect_error_logs(
     ]
 
 
+def _default_disk_usage(path: str) -> tuple[int, int, int]:
+    usage = shutil.disk_usage(path)
+    return (usage.total, usage.used, usage.free)
+
+
+def parse_df_kp(output: str) -> list[DiskInfo]:
+    """Parse ``df -kP`` output (POSIX; one line per filesystem)."""
+
+    disks: list[DiskInfo] = []
+    for line in output.splitlines()[1:]:
+        fields = line.split(None, 5)
+        if len(fields) < 6:
+            continue
+        _fs, blocks_text, used_text, avail_text, _capacity, mount = fields
+        try:
+            total = int(blocks_text) * 1024
+            used = int(used_text) * 1024
+            available = int(avail_text) * 1024
+        except ValueError:
+            continue
+        disks.append(
+            DiskInfo(
+                mount=mount.strip(),
+                total_bytes=total,
+                used_bytes=used,
+                available_bytes=available,
+            )
+        )
+    return disks
+
+
+def parse_meminfo(text: str) -> MemoryInfo:
+    """Parse Linux ``/proc/meminfo``; MemAvailable is the available figure."""
+
+    values: dict[str, int] = {}
+    for line in text.splitlines():
+        name, _, rest = line.partition(":")
+        parts = rest.strip().split()
+        if parts and parts[0].isdigit():
+            values[name] = int(parts[0]) * 1024
+    if "MemTotal" not in values:
+        raise SystemInspectError("/proc/meminfo did not contain MemTotal")
+    return MemoryInfo(
+        total_bytes=values["MemTotal"],
+        available_bytes=values.get("MemAvailable", values.get("MemFree", 0)),
+    )
+
+
+def parse_vm_stat(output: str, *, total_bytes: int) -> MemoryInfo:
+    """Parse macOS ``vm_stat``; free+inactive+speculative pages are available."""
+
+    page_size = 4096
+    pages: dict[str, int] = {}
+    for line in output.splitlines():
+        if "page size of" in line:
+            match = re.search(r"page size of (\d+) bytes", line)
+            if match:
+                page_size = int(match.group(1))
+            continue
+        name, _, rest = line.partition(":")
+        number = rest.strip().rstrip(".")
+        if number.isdigit():
+            pages[name] = int(number)
+    available_pages = (
+        pages.get("Pages free", 0)
+        + pages.get("Pages inactive", 0)
+        + pages.get("Pages speculative", 0)
+    )
+    return MemoryInfo(
+        total_bytes=total_bytes, available_bytes=available_pages * page_size
+    )
+
+
+def parse_wmic_os_memory(output: str) -> MemoryInfo:
+    """Parse ``wmic OS get FreePhysicalMemory,TotalVisibleMemorySize`` (kB)."""
+
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and all(field.isdigit() for field in fields):
+            free_kb, total_kb = int(fields[0]), int(fields[1])
+            return MemoryInfo(
+                total_bytes=total_kb * 1024, available_bytes=free_kb * 1024
+            )
+    raise SystemInspectError("could not parse wmic memory output")
+
+
+def collect_disk(
+    *,
+    runner: CommandRunner | None = None,
+    system: str | None = None,
+    exists_fn: Callable[[str], bool] | None = None,
+    usage_fn: Callable[[str], tuple[int, int, int]] | None = None,
+) -> list[DiskInfo]:
+    """Collect mounted filesystem capacity.
+
+    POSIX reads ``df -kP``; Windows probes each fixed drive letter with
+    ``shutil.disk_usage``. Both degrade to :class:`SystemInspectError` when
+    the platform tool is missing.
+    """
+
+    run = runner if runner is not None else _default_runner
+    system = system if system is not None else platform.system()
+    if system in ("Linux", "Darwin"):
+        return parse_df_kp(run(["df", "-kP"]))
+    if system == "Windows":
+        exists = exists_fn if exists_fn is not None else os.path.exists
+        usage = usage_fn if usage_fn is not None else _default_disk_usage
+        disks = []
+        for letter in "CDEFGHIJKLMNOPQRSTUVWXYZAB":
+            root = f"{letter}:\\"
+            if not exists(root):
+                continue
+            total, used, free = usage(root)
+            disks.append(
+                DiskInfo(
+                    mount=root, total_bytes=total, used_bytes=used, available_bytes=free
+                )
+            )
+        return disks
+    raise SystemInspectError(f"disk inspection is not supported on {system}")
+
+
+def _read_meminfo() -> str:
+    with open("/proc/meminfo", encoding="utf-8") as handle:
+        return handle.read()
+
+
+def collect_memory(
+    *,
+    runner: CommandRunner | None = None,
+    system: str | None = None,
+    meminfo_reader: Callable[[], str] | None = None,
+) -> MemoryInfo:
+    """Collect physical memory total/available.
+
+    Linux reads ``/proc/meminfo`` directly; macOS combines ``sysctl
+    hw.memsize`` with ``vm_stat``; Windows asks ``wmic OS``.
+    """
+
+    run = runner if runner is not None else _default_runner
+    system = system if system is not None else platform.system()
+    if system == "Linux":
+        reader = meminfo_reader if meminfo_reader is not None else _read_meminfo
+        return parse_meminfo(reader())
+    if system == "Darwin":
+        total_text = run(["sysctl", "-n", "hw.memsize"]).strip()
+        if not total_text.isdigit():
+            raise SystemInspectError("sysctl hw.memsize returned no number")
+        return parse_vm_stat(run(["vm_stat"]), total_bytes=int(total_text))
+    if system == "Windows":
+        return parse_wmic_os_memory(
+            run(["wmic", "OS", "get", "FreePhysicalMemory,TotalVisibleMemorySize"])
+        )
+    raise SystemInspectError(f"memory inspection is not supported on {system}")
+
+
+def collect_cpu(
+    *,
+    cores_fn: Callable[[], int | None] | None = None,
+    load_fn: Callable[[], tuple[float, float, float]] | None = None,
+) -> CpuInfo:
+    """Collect logical core count and load averages via the stdlib.
+
+    ``os.getloadavg`` raises OSError on Windows, so loads degrade to None
+    there instead of failing the whole snapshot.
+    """
+
+    cores = cores_fn if cores_fn is not None else os.cpu_count
+    load = load_fn if load_fn is not None else os.getloadavg
+    try:
+        load_1m, load_5m, load_15m = load()
+    except OSError:
+        load_1m = load_5m = load_15m = None
+    return CpuInfo(
+        logical_cores=cores(),
+        load_1m=load_1m,
+        load_5m=load_5m,
+        load_15m=load_15m,
+    )
+
+
+def _render_bytes(count: int) -> str:
+    gib = count / (1024**3)
+    if gib >= 1:
+        return f"{gib:.1f}GB"
+    return f"{count / (1024**2):.0f}MB"
+
+
+def render_resources(
+    cpu: CpuInfo | None,
+    memory: MemoryInfo | None,
+    disks: Sequence[DiskInfo],
+    *,
+    errors: Sequence[str] = (),
+) -> str:
+    """Human-readable resource snapshot; sections degrade individually."""
+
+    lines: list[str] = []
+    if cpu is not None:
+        cores = str(cpu.logical_cores) if cpu.logical_cores is not None else "?"
+        if cpu.load_1m is not None:
+            lines.append(
+                f"CPU: {cores} cores, load {cpu.load_1m:.2f} {cpu.load_5m:.2f} {cpu.load_15m:.2f}"
+            )
+        else:
+            lines.append(f"CPU: {cores} cores")
+    if memory is not None:
+        lines.append(
+            f"Memory: {_render_bytes(memory.available_bytes)} available of {_render_bytes(memory.total_bytes)}"
+        )
+    lines.extend(
+        f"Disk {disk.mount}: {_render_bytes(disk.available_bytes)} free of {_render_bytes(disk.total_bytes)}"
+        for disk in disks
+    )
+    lines.extend(f"unavailable: {error}" for error in errors)
+    return "\n".join(lines) if lines else "no resource data"
+
+
 def render_services(services: Sequence[ServiceInfo], *, total: int) -> str:
     """Human-readable service table, failures first."""
 
@@ -439,15 +688,23 @@ def render_listeners(listeners: Sequence[PortListener]) -> str:
 
 __all__ = [
     "CommandRunner",
+    "CpuInfo",
+    "DiskInfo",
+    "MemoryInfo",
     "PortListener",
     "ProcessInfo",
     "ServiceInfo",
     "SystemInspectError",
+    "collect_cpu",
+    "collect_disk",
     "collect_error_logs",
     "collect_listeners",
+    "collect_memory",
     "collect_processes",
     "collect_services",
+    "parse_df_kp",
     "parse_launchctl",
+    "parse_meminfo",
     "parse_netstat_macos",
     "parse_netstat_windows",
     "parse_ps",
@@ -455,7 +712,10 @@ __all__ = [
     "parse_ss",
     "parse_systemctl",
     "parse_tasklist",
+    "parse_vm_stat",
+    "parse_wmic_os_memory",
     "render_listeners",
     "render_processes",
+    "render_resources",
     "render_services",
 ]

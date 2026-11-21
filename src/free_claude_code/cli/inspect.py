@@ -23,16 +23,21 @@ from free_claude_code.repo import (
 from free_claude_code.repo.git import GitError, GitRepo
 from free_claude_code.terminal import (
     SystemInspectError,
+    collect_cpu,
+    collect_disk,
     collect_env_context,
     collect_error_logs,
     collect_listeners,
+    collect_memory,
     collect_processes,
+    collect_runtimes,
     collect_services,
     collect_toolchain,
     load_run_history,
     render_env_context,
     render_listeners,
     render_processes,
+    render_resources,
     render_run_summary,
     render_services,
     render_toolchain,
@@ -81,6 +86,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     subparsers.add_parser("status", help="Git state and workspace summary")
 
     subparsers.add_parser("env", help="Platform, shell, git and workspace listing")
+    subparsers.add_parser(
+        "runtimes", help="Language runtimes, package managers and build tools"
+    )
+    subparsers.add_parser("resources", help="CPU, memory and disk snapshot")
     subparsers.add_parser(
         "toolchain", help="Detected DevOps tools and install guidance"
     )
@@ -185,6 +194,53 @@ def main(argv: Sequence[str] | None = None) -> None:
             )
         else:
             print(render_toolchain(tools))
+        return
+
+    if args.command == "runtimes":
+        runtimes = collect_runtimes()
+        if args.json:
+            print(
+                json.dumps(
+                    {"tools": [dataclasses.asdict(t) for t in runtimes]}, indent=2
+                )
+            )
+        else:
+            print(render_toolchain(runtimes))
+        return
+
+    if args.command == "resources":
+        cpu = None
+        memory = None
+        disks: list[Any] = []
+        errors: list[str] = []
+        try:
+            cpu = collect_cpu()
+        except SystemInspectError as exc:
+            errors.append(str(exc))
+        try:
+            memory = collect_memory()
+        except SystemInspectError as exc:
+            errors.append(str(exc))
+        try:
+            disks = list(collect_disk())
+        except SystemInspectError as exc:
+            errors.append(str(exc))
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "cpu": dataclasses.asdict(cpu) if cpu is not None else None,
+                        "memory": (
+                            dataclasses.asdict(memory) if memory is not None else None
+                        ),
+                        "disks": [dataclasses.asdict(d) for d in disks],
+                        "errors": errors,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(render_resources(cpu, memory, disks, errors=errors))
         return
 
     if args.command == "processes":
