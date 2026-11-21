@@ -1,8 +1,10 @@
 """DevOps toolchain detection for fcc-inspect toolchain."""
 
 from free_claude_code.terminal.toolchain import (
+    RUNTIME_SPECS,
     TOOLCHAIN_SPECS,
     ToolInfo,
+    collect_runtimes,
     collect_toolchain,
     render_toolchain,
 )
@@ -79,3 +81,46 @@ def test_render_lists_found_and_missing() -> None:
     assert "docker" in text and "27.1.1" in text
     assert "kubectl" in text and "not found" in text
     assert "https://kubernetes.io/docs/tasks/tools/" in text
+
+
+def test_runtimes_cover_the_roadmap_families() -> None:
+    names = {spec.name for spec in RUNTIME_SPECS}
+    assert {
+        "python3",
+        "pip",
+        "uv",
+        "node",
+        "npm",
+        "go",
+        "rustc",
+        "cargo",
+        "java",
+        "make",
+        "git",
+    } <= names
+
+
+def test_collect_runtimes_detects_versions() -> None:
+    runtimes = collect_runtimes(
+        which=fake_which({"node": "/usr/bin/node", "go": "/usr/local/go/bin/go"}),
+        probe=fake_probe(
+            {
+                "node": "v22.11.0\n",
+                "go": "go version go1.23.2 linux/amd64\n",
+            }
+        ),
+    )
+    node = next(tool for tool in runtimes if tool.name == "node")
+    assert node.path == "/usr/bin/node"
+    assert node.version == "22.11.0"
+    go = next(tool for tool in runtimes if tool.name == "go")
+    assert go.version == "1.23.2"
+    pip = next(tool for tool in runtimes if tool.name == "pip")
+    assert pip.path is None
+    assert pip.install_hint
+
+
+def test_collect_runtimes_is_distinct_from_toolchain() -> None:
+    runtime_names = {spec.name for spec in RUNTIME_SPECS}
+    toolchain_names = {spec.name for spec in TOOLCHAIN_SPECS}
+    assert runtime_names.isdisjoint(toolchain_names)

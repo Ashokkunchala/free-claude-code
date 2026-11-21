@@ -77,6 +77,34 @@ TOOLCHAIN_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec("ssh", ("ssh", "-V"), "install the OpenSSH client for your platform"),
 )
 
+#: Language runtimes, package managers and build tools (roadmap section 4:
+#: "runtimes, package managers and PATH"). Detection and guidance work
+#: exactly like TOOLCHAIN_SPECS; kept separate so callers can report the
+#: DevOps toolchain and the language toolchain as distinct sections.
+RUNTIME_SPECS: tuple[ToolSpec, ...] = (
+    ToolSpec("python3", ("python3", "--version"), "https://www.python.org/downloads/"),
+    ToolSpec(
+        "pip", ("pip", "--version"), "https://pip.pypa.io/en/stable/installation/"
+    ),
+    ToolSpec(
+        "uv",
+        ("uv", "--version"),
+        "https://docs.astral.sh/uv/getting-started/installation/",
+    ),
+    ToolSpec("node", ("node", "--version"), "https://nodejs.org/en/download"),
+    ToolSpec("npm", ("npm", "--version"), "https://nodejs.org/en/download"),
+    ToolSpec("go", ("go", "version"), "https://go.dev/doc/install"),
+    ToolSpec(
+        "rustc", ("rustc", "--version"), "https://www.rust-lang.org/tools/install"
+    ),
+    ToolSpec(
+        "cargo", ("cargo", "--version"), "https://www.rust-lang.org/tools/install"
+    ),
+    ToolSpec("java", ("java", "-version"), "https://adoptium.net/installation/"),
+    ToolSpec("make", ("make", "--version"), "install GNU Make for your platform"),
+    ToolSpec("git", ("git", "--version"), "https://git-scm.com/downloads"),
+)
+
 
 def _default_which(name: str) -> str | None:
     return shutil.which(name)
@@ -111,13 +139,14 @@ def collect_toolchain(
     *,
     which: WhichFn | None = None,
     probe: ProbeFn | None = None,
+    specs: tuple[ToolSpec, ...] = TOOLCHAIN_SPECS,
 ) -> tuple[ToolInfo, ...]:
     """Detect every known tool; missing tools carry install guidance."""
 
     find = which if which is not None else _default_which
     run = probe if probe is not None else _default_probe
     tools: list[ToolInfo] = []
-    for spec in TOOLCHAIN_SPECS:
+    for spec in specs:
         path = find(spec.name)
         if path is None:
             tools.append(ToolInfo(spec.name, None, None, spec.install_hint))
@@ -141,10 +170,22 @@ def render_toolchain(tools: tuple[ToolInfo, ...]) -> str:
     return "\n".join(lines)
 
 
+def collect_runtimes(
+    *,
+    which: WhichFn | None = None,
+    probe: ProbeFn | None = None,
+) -> tuple[ToolInfo, ...]:
+    """Detect language runtimes, package managers and build tools."""
+
+    return collect_toolchain(which=which, probe=probe, specs=RUNTIME_SPECS)
+
+
 __all__ = [
+    "RUNTIME_SPECS",
     "TOOLCHAIN_SPECS",
     "ToolInfo",
     "ToolSpec",
+    "collect_runtimes",
     "collect_toolchain",
     "render_toolchain",
 ]

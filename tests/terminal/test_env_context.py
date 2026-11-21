@@ -82,3 +82,58 @@ def test_propose_plan_threads_context_to_model():
     plan = propose_plan("do it", model, workspace="/ws", context="Platform: Linux")
     assert plan.goal == "g"
     assert "Platform: Linux" in seen[0]
+
+
+def test_collects_terminal_repo_root_and_path_count(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    monkeypatch.setenv("TERM_PROGRAM", "ghostty")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin:/usr/local/bin")
+    context = collect_env_context(str(tmp_path))
+    assert context.terminal == "ghostty"
+    assert context.repo_root == str(tmp_path.resolve())
+    assert context.path_entries == 3
+
+
+def test_terminal_falls_back_to_term(monkeypatch):
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    context = collect_env_context(".")
+    assert context.terminal == "xterm-256color"
+
+
+def test_repo_root_none_outside_git(tmp_path):
+    context = collect_env_context(str(tmp_path))
+    assert context.repo_root is None
+
+
+def test_render_includes_new_fields():
+    text = render_env_context(
+        EnvContext(
+            os_name="Darwin",
+            arch="arm64",
+            python_version="3.14.0",
+            shell="/bin/zsh",
+            git_branch="main",
+            terminal="ghostty",
+            repo_root="/ws/repo",
+            path_entries=9,
+        )
+    )
+    assert "Terminal: ghostty" in text
+    assert "Git root: /ws/repo" in text
+    assert "PATH entries: 9" in text
+
+
+def test_render_omits_absent_new_fields():
+    text = render_env_context(
+        EnvContext(
+            os_name="Linux",
+            arch="x86_64",
+            python_version="3.14.0",
+            shell=None,
+            git_branch=None,
+        )
+    )
+    assert "Terminal:" not in text
+    assert "Git root:" not in text
+    assert "PATH entries:" not in text
