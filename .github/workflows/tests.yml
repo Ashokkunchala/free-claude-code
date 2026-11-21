@@ -113,6 +113,8 @@ jobs:
     # Windows runners periodically degrade to a crawl (jobs cancelled at the
     # 15-minute timeout on PRs #48-#50 while the same suite takes ~6 minutes
     # on a healthy runner); a longer budget absorbs slow runs without re-runs.
+    # The e2e suite itself now runs ~24 minutes on Windows, so its budget must
+    # cover the full suite plus setup with headroom for slow-runner days.
     timeout-minutes: ${{ matrix.timeout }}
     permissions:
       contents: read
@@ -125,7 +127,7 @@ jobs:
             timeout: 15
           - os: Windows
             runner: windows-latest
-            timeout: 25
+            timeout: 35
           - os: macOS
             runner: macos-latest
             timeout: 15
