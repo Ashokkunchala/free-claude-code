@@ -840,7 +840,7 @@ def test_install_sh_fresh_install_is_verified(posix_harness: PosixHarness) -> No
     assert any(
         call.startswith(
             "uv:tool install --force --refresh-package free-claude-code "
-            "--python 3.14.7 free-claude-code"
+            "--python 3.14.7 git+https://github.com/Ashokkunchala/free-claude-code@main"
         )
         for call in calls
     )
@@ -3190,7 +3190,7 @@ def test_install_ps1_fresh_install_is_verified(
         call.startswith(
             "uv:tool install --force --refresh-package free-claude-code "
             "--python cpython-3.14.7-windows-x86_64-none "
-            "free-claude-code"
+            "git+https://github.com/Ashokkunchala/free-claude-code@main"
         )
         for call in calls
     )
@@ -3772,8 +3772,7 @@ def test_install_ps1_preserves_valid_existing_tools(
         call for call in powershell_harness.calls() if call.startswith("download:")
     ]
     assert download_calls == [
-        "download:https://raw.githubusercontent.com/Alishahryar1/"
-        "free-claude-code/main/scripts/install-muse.ps1"
+        "download:https://raw.githubusercontent.com/Ashokkunchala/free-claude-code/main/scripts/install-muse.ps1"
     ]
     assert "muse-install:external" in powershell_harness.calls()
     assert "leaving it unchanged" in result.stdout
@@ -4229,7 +4228,7 @@ def test_installers_use_native_clients_and_single_python_selection() -> None:
         assert "@anthropic-ai/claude-code" not in text
         assert "@openai/codex" not in text
         assert "@earendil-works/pi-coding-agent" not in text
-        assert "git+" not in text
+        assert "git+https://github.com/Ashokkunchala/free-claude-code@main" in text
         assert "git --version" not in text
         assert (
             "https://github.com/Alishahryar1/free-claude-code/archive/refs/heads/main.zip"
@@ -4246,8 +4245,7 @@ def test_installers_use_native_clients_and_single_python_selection() -> None:
     assert "https://x.ai/cli/install.ps1" in powershell
     assert "https://dev.meta.ai/install.sh" in shell
     assert (
-        "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/"
-        "main/scripts/install-muse.ps1"
+        "https://raw.githubusercontent.com/Ashokkunchala/free-claude-code/main/scripts/install-muse.ps1"
     ) in powershell
 
 

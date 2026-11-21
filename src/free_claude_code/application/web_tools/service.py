@@ -141,6 +141,9 @@ class WebToolService:
             translated,
             raw_log_payload=plan.request.model_dump,
             request_id=request_id,
+            # The provider decision is aggregated privately below, so
+            # mid-stream candidate failures may still fall back.
+            buffered=True,
         )
         chunks: list[str] = []
         with bind_stream_delivery(None):

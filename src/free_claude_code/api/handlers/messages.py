@@ -32,6 +32,7 @@ from free_claude_code.application.routing import (
     RoutedMessagesRequest,
     RoutedNativeMessagesRequest,
 )
+from free_claude_code.application.stream_resume import AnthropicStreamResumePolicy
 from free_claude_code.application.web_tools.ports import WebToolsPort
 from free_claude_code.application.web_tools.service import WebToolService
 from free_claude_code.config.settings import Settings
@@ -155,6 +156,17 @@ class MessagesHandler:
                         routed,
                         raw_log_payload=routed.request.model_dump,
                         request_id=request_id,
+                        # Non-streaming clients only see the aggregated
+                        # message, so mid-stream candidate failures may
+                        # still fall back.  Streaming clients get a resume
+                        # policy so a failed candidate can be continued by
+                        # the next one.
+                        buffered=request_data.stream is not True,
+                        resume_policy=(
+                            AnthropicStreamResumePolicy()
+                            if request_data.stream is True
+                            else None
+                        ),
                     )
                 )
             return await self._to_public_response(

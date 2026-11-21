@@ -1,4 +1,4 @@
-"""The updater checks published versions before authorizing installation."""
+"""The updater checks the fork's main commit before authorizing installation."""
 
 from importlib.metadata import PackageNotFoundError
 
@@ -7,20 +7,23 @@ import pytest
 
 from free_claude_code.updater import check as update_check
 
+INSTALLED_SHA = "1" * 40
+REMOTE_SHA = "2" * 40
 
-def release(version="1.10.0", *, yanked=False):
-    return {"info": {"version": version}, "urls": [{"yanked": yanked}]}
+
+def commit(sha=REMOTE_SHA):
+    return {"sha": sha}
 
 
 @pytest.fixture
 def check(monkeypatch):
     original_client = httpx.Client
 
-    def run(installed="1.9.0", payload=None, status=200, error=None, body=None):
+    def run(installed="1.0.0", payload=None, status=200, error=None, body=None):
         monkeypatch.setattr(update_check, "version", lambda name: installed)
 
         def respond(request):
-            assert str(request.url) == update_check.PYPI_URL
+            assert str(request.url) == update_check.COMMITS_URL
             if error is not None:
                 raise error
             if body is not None:
@@ -40,17 +43,18 @@ def check(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("installed", "expected"),
+    ("installed", "payload", "expected"),
     [
-        ("1.9.0", 10),
-        ("1.10.0", 0),
-        ("1.11.0", 0),
-        ("1.10.0+local", 0),
-        ("1.10.0.dev1", 10),
+        ("1.0.0", commit(), 10),
+        ("1.0.0.dev1", commit(), 10),
+        (f"1.0.0.dev1+g{INSTALLED_SHA}", commit(INSTALLED_SHA), 0),
+        (f"1.0.0.dev1+g{INSTALLED_SHA}", commit(), 10),
+        (f"1.0.0.dev1+g{INSTALLED_SHA}.dirty", commit(INSTALLED_SHA), 0),
+        ("1.0.0+build.7", commit(), 10),
     ],
 )
-def test_version_comparison(check, capsys, installed, expected):
-    assert check(installed, release()) == expected
+def test_commit_comparison(check, capsys, installed, payload, expected):
+    assert check(installed, payload) == expected
     output = capsys.readouterr()
     assert installed in output.out
     assert not output.err
@@ -61,23 +65,21 @@ def test_version_comparison(check, capsys, installed, expected):
     [
         None,
         {},
-        {"info": []},
-        release("invalid"),
-        release("2.0rc1"),
-        release("2.0.dev1"),
-        release(yanked=True),
-        {"info": {"version": "2.0"}, "urls": []},
-        {"info": {"version": "2.0"}, "urls": [{}]},
+        {"sha": 123},
+        {"sha": None},
+        {"sha": "not-a-commit"},
+        {"sha": "1" * 39},
+        {"sha": "g" + "1" * 39},
     ],
 )
-def test_invalid_release_does_not_authorize_installation(check, capsys, payload):
+def test_invalid_commit_does_not_authorize_installation(check, capsys, payload):
     assert check(payload=payload) == 1
     assert capsys.readouterr().err
 
 
 @pytest.mark.parametrize("installed", ["invalid", "0+unknown"])
 def test_unknown_installed_version(check, installed):
-    assert check(installed, release()) == 1
+    assert check(installed, commit()) == 1
 
 
 def test_missing_distribution(monkeypatch, capsys):
@@ -90,7 +92,7 @@ def test_missing_distribution(monkeypatch, capsys):
 
 
 def test_http_error(check, capsys):
-    assert check(payload=release(), status=503) == 1
+    assert check(payload=commit(), status=503) == 1
     assert capsys.readouterr().err
 
 

@@ -14,8 +14,12 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-INSTALL_URL = "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install"
+INSTALL_URL = "https://raw.githubusercontent.com/Ashokkunchala/free-claude-code/main/scripts/install"
+COMMITS_URL = "https://api.github.com/repos/Ashokkunchala/free-claude-code/commits/main"
 SCRIPTS = ("fcc-update", "fcc-update.cmd")
+INSTALLED_SHA = "1" * 40
+OUTDATED_SHA = "2" * 40
+INSTALLED_VERSION = f"1.0.0.dev1+g{INSTALLED_SHA}"
 
 
 @contextlib.contextmanager
@@ -28,12 +32,8 @@ def installer_server(body, status, outcome):
             payload = body.encode("utf-8")
             response_status = status
             if self.path == "/metadata":
-                version = {"current": "1.0.0", "newer-installed": "0.9.0"}.get(
-                    outcome, "2.0.0"
-                )
-                payload = json.dumps(
-                    {"info": {"version": version}, "urls": [{"yanked": False}]}
-                ).encode()
+                sha = INSTALLED_SHA if outcome == "current" else OUTDATED_SHA
+                payload = json.dumps({"sha": sha}).encode()
                 response_status = 503 if outcome == "check-error" else 200
             self.send_response(response_status)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -58,12 +58,13 @@ def installer_server(body, status, outcome):
 
 
 def fixture_wheel(area, url):
-    wheel = area / "free_claude_code-1.0.0-py3-none-any.whl"
-    dist = "free_claude_code-1.0.0"
+    wheel = area / f"free_claude_code-{INSTALLED_VERSION}-py3-none-any.whl"
+    dist = f"free_claude_code-{INSTALLED_VERSION}"
     with zipfile.ZipFile(wheel, "w") as archive:
         archive.writestr(
             f"{dist}.dist-info/METADATA",
-            "Metadata-Version: 2.1\nName: free-claude-code\nVersion: 1.0.0\n"
+            "Metadata-Version: 2.1\nName: free-claude-code\n"
+            f"Version: {INSTALLED_VERSION}\n"
             "Requires-Dist: httpx>=0.28.1\nRequires-Dist: packaging>=26.3\n",
         )
         archive.writestr(
@@ -84,7 +85,7 @@ def fixture_wheel(area, url):
             archive.writestr(
                 f"free_claude_code/{name}",
                 source.replace(
-                    "https://pypi.org/pypi/free-claude-code/json",
+                    COMMITS_URL,
                     url.removesuffix("/install") + "/metadata",
                 ),
             )
@@ -104,7 +105,6 @@ def fixture_wheel(area, url):
         "error",
         "download-error",
         "current",
-        "newer-installed",
         "check-error",
     ],
 )
@@ -146,8 +146,8 @@ Write-Output "installer:$VoiceLocal|$TorchBackend|$answer"
         }.get(outcome, "")
     else:
         body = """read -r answer
-printf 'installer:%s|%s|%s|%s\\n' "$1" "$2" "$3" "$answer"
-printf 'exit 99\\n' > "$FCC_TEST_LAUNCHER"
+printf 'installer:%s|%s|%s|%s\n' "$1" "$2" "$3" "$answer"
+printf 'exit 99\n' > "$FCC_TEST_LAUNCHER"
 printf 'replaced after checker exited' > "$FCC_TEST_CHECKER"
 """
         arguments = ["--voice-local", "--torch-backend", "cu130"]
@@ -194,7 +194,7 @@ printf 'replaced after checker exited' > "$FCC_TEST_CHECKER"
             text=True,
             timeout=30,
         )
-        skipped = outcome in {"current", "newer-installed", "check-error"}
+        skipped = outcome in {"current", "check-error"}
         assert requests == ["/metadata"] + (
             [] if skipped else ["/install.ps1" if os.name == "nt" else "/install.sh"]
         ), result.stdout + result.stderr

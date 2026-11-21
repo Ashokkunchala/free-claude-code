@@ -1331,15 +1331,20 @@ validate_args() {
 
 package_spec() {
     if [ "$voice_local" -eq 1 ]; then
-        printf '%s' 'free-claude-code[voice_local]'
+        printf '%s' 'free-claude-code[voice_local] @ git+https://github.com/Ashokkunchala/free-claude-code@main'
     else
-        printf '%s' 'free-claude-code'
+        printf '%s' 'git+https://github.com/Ashokkunchala/free-claude-code@main'
     fi
 }
 
 install_free_claude_code() {
     assert_no_fcc_processes_running
     spec=$(package_spec)
+
+    if [ "$dry_run" -eq 0 ] && ! command -v git >/dev/null 2>&1; then
+        printf '%s\n' "git is required to install Free Claude Code from source. Install git, then retry." >&2
+        exit 1
+    fi
 
     if [ -n "$torch_backend" ]; then
         run uv tool install --force --refresh-package free-claude-code --python "$PYTHON_VERSION" --torch-backend "$torch_backend" "$spec"

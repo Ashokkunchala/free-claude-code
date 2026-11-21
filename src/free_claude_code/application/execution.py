@@ -37,12 +37,19 @@ from .routing import (
     RoutedNativeMessagesRequest,
     RoutedResponsesRequest,
 )
+from .stream_resume import AnthropicStreamResumePolicy, ResumePlan
 
 ResponsesTokenCounter = Callable[[OpenAIResponsesRequest], int]
 WireApi = Literal["messages", "responses"]
 CandidateStreamOpener = Callable[
     [int, ProviderModelTarget], Awaitable[AsyncIterator[str]]
 ]
+
+
+def _default_retry_backoff(attempt: int) -> float:
+    """Bounded exponential pause between candidates after rate limiting."""
+
+    return min(0.5 * (2**attempt), 4.0)
 
 
 def _is_automatic_route_failure(failure: ExecutionFailure) -> bool:
@@ -74,6 +81,7 @@ class ProviderExecutor:
         log_raw_payloads: bool = False,
         request_headers: Mapping[str, str] | None = None,
         model_info_lookup: ModelInfoLookup | None = None,
+        retry_backoff: Callable[[int], float] = _default_retry_backoff,
     ) -> None:
         if not math.isfinite(progress_timeout_seconds) or progress_timeout_seconds <= 0:
             raise ValueError("progress_timeout_seconds must be finite and positive")
@@ -85,6 +93,7 @@ class ProviderExecutor:
         self._log_raw_payloads = log_raw_payloads
         self._request_headers = MappingProxyType(dict(request_headers or {}))
         self._progress_timeout_seconds = float(progress_timeout_seconds)
+        self._retry_backoff = retry_backoff
 
     def _progress_timeout_failure(
         self,
@@ -216,8 +225,22 @@ class ProviderExecutor:
         *,
         raw_log_payload: Callable[[], object],
         request_id: str,
+        buffered: bool = False,
+        resume_policy: AnthropicStreamResumePolicy | None = None,
     ) -> AsyncIterator[str]:
-        """Execute one Anthropic Messages request."""
+        """Execute one Anthropic Messages request.
+
+        With ``buffered=True`` each candidate's chunks are held until that
+        candidate completes, so a mid-stream failure can still fall back to
+        the next candidate: nothing has been delivered to the caller yet.
+        Use it for consumers that aggregate the stream privately (for
+        example non-streaming requests).
+
+        With a ``resume_policy`` a streaming candidate that fails after
+        delivering partial output can still fall back: the policy tracks
+        what the client saw and the next candidate continues it through an
+        assistant-prefill request.
+        """
 
         primary_request = routed.request.model_copy(deep=True)
         input_tokens = self._token_counter(
@@ -240,6 +263,11 @@ class ProviderExecutor:
                     deep=True,
                 )
             )
+            resume_plan = (
+                resume_policy.take_staged_plan() if resume_policy is not None else None
+            )
+            if resume_plan is not None:
+                request = resume_plan.apply(request)
             return provider.stream_messages(
                 request,
                 input_tokens=input_tokens,
@@ -263,6 +291,8 @@ class ProviderExecutor:
             ingress_count=len(routed.request.messages),
             request_id=request_id,
             open_candidate=open_candidate,
+            buffered=buffered,
+            resume_policy=resume_policy,
         )
 
     def stream_responses(
@@ -339,8 +369,16 @@ class ProviderExecutor:
         ingress_count: int,
         request_id: str,
         open_candidate: CandidateStreamOpener,
+        buffered: bool = False,
+        resume_policy: AnthropicStreamResumePolicy | None = None,
     ) -> AsyncIterator[str]:
-        """Start and consume candidates through one protocol-blind lifecycle."""
+        """Start and consume candidates through one protocol-blind lifecycle.
+
+        With ``buffered=True`` candidate output is released only after the
+        candidate finishes, which keeps mid-stream failures recoverable by
+        the next candidate.  Without it the first chunk commits the
+        candidate because the caller may already have received it.
+        """
 
         primary = resolved.primary
         automatic_start = 1 + len(resolved.fallbacks)
@@ -397,14 +435,21 @@ class ProviderExecutor:
             loop = asyncio.get_running_loop()
             progress_deadline = loop.time() + self._progress_timeout_seconds
             automatic_enabled = False
+            stream_committed = False
+            rate_limit_streak = 0
+            resume_plan: ResumePlan | None = None
             for index, target in enumerate(candidates):
                 record_request_route(target.provider_id, target.provider_model)
                 provider_stream: AsyncIterator[str] | None = None
                 candidate_committed = False
                 candidate_failure: ExecutionFailure | None = None
+                buffered_chunks: list[str] = []
                 try:
                     opening_started = monotonic()
                     try:
+                        if resume_plan is not None and resume_policy is not None:
+                            resume_policy.stage_plan(resume_plan)
+                        resume_plan = None
                         provider_stream = await open_candidate(index, target)
                     except ExecutionFailure as failure:
                         candidate_failure = failure
@@ -451,8 +496,19 @@ class ProviderExecutor:
                         if not chunk:
                             await asyncio.sleep(0)
                             continue
-                        if not candidate_committed:
+                        frames = (
+                            resume_policy.transform(chunk)
+                            if resume_policy is not None
+                            else (chunk,)
+                        )
+                        if resume_policy is not None:
+                            policy_failure = resume_policy.take_pending_failure()
+                            if policy_failure is not None:
+                                candidate_failure = policy_failure
+                                break
+                        if frames and not candidate_committed:
                             candidate_committed = True
+                            stream_committed = True
                             if index > 0:
                                 self._trace_fallback_selected(
                                     request_id=request_id,
@@ -461,7 +517,11 @@ class ProviderExecutor:
                                     candidate_index=index + 1,
                                     candidate_count=len(candidates),
                                 )
-                        yield chunk
+                        if buffered:
+                            buffered_chunks.extend(frames)
+                        else:
+                            for frame in frames:
+                                yield frame
                         progress_deadline = loop.time() + self._progress_timeout_seconds
                 finally:
                     if provider_stream is not None:
@@ -486,15 +546,93 @@ class ProviderExecutor:
                                 provider_id=target.provider_id,
                             ) from exc
 
+                if candidate_failure is None and resume_policy is not None:
+                    finish_frames = resume_policy.finish()
+                    policy_failure = resume_policy.take_pending_failure()
+                    if policy_failure is not None:
+                        candidate_failure = policy_failure
+                    elif not resume_policy.saw_content_block and index + 1 < len(
+                        candidates
+                    ):
+                        # An empty completion is a failed response: the chain
+                        # must keep working.  The held terminal frames stay
+                        # undelivered; the next candidate supplies its own.
+                        candidate_failure = ExecutionFailure(
+                            kind=FailureKind.UNAVAILABLE,
+                            status_code=502,
+                            message="Provider returned an empty response.",
+                            retryable=True,
+                        )
+                    if candidate_failure is None:
+                        if finish_frames and not candidate_committed:
+                            candidate_committed = True
+                            stream_committed = True
+                            if index > 0:
+                                self._trace_fallback_selected(
+                                    request_id=request_id,
+                                    wire_api=wire_api,
+                                    selected=target,
+                                    candidate_index=index + 1,
+                                    candidate_count=len(candidates),
+                                )
+                        if buffered:
+                            buffered_chunks.extend(finish_frames)
+                        else:
+                            for frame in finish_frames:
+                                yield frame
+                if (
+                    candidate_failure is None
+                    and resume_policy is None
+                    and not candidate_committed
+                    and not buffered_chunks
+                    and index + 1 < len(candidates)
+                ):
+                    # Nothing was emitted at all: safe to try the next candidate.
+                    candidate_failure = ExecutionFailure(
+                        kind=FailureKind.UNAVAILABLE,
+                        status_code=502,
+                        message="Provider returned an empty response.",
+                        retryable=True,
+                    )
                 if candidate_failure is None:
+                    for buffered_chunk in buffered_chunks:
+                        yield buffered_chunk
                     return
                 automatic_enabled = automatic_enabled or _is_automatic_route_failure(
                     candidate_failure
                 )
-                if candidate_committed or index + 1 >= len(candidates):
+                # A resumable stream can still fall back after partial output:
+                # the policy plans how the next candidate continues it.
+                resume_plan = None
+                if (
+                    not buffered
+                    and resume_policy is not None
+                    and _is_automatic_route_failure(candidate_failure)
+                ):
+                    resume_plan = resume_policy.begin_resume()
+                # Buffered delivery has released nothing, so a mid-stream
+                # failure is still recoverable by the next candidate.
+                if index + 1 >= len(candidates):
+                    raise candidate_failure
+                if resume_plan is None and stream_committed and not buffered:
                     raise candidate_failure
                 if index + 1 >= automatic_start and not automatic_enabled:
                     raise candidate_failure
+                if resume_policy is not None and resume_plan is None:
+                    resume_policy.reset()
+                if candidate_failure.kind in {
+                    FailureKind.RATE_LIMIT,
+                    FailureKind.OVERLOADED,
+                }:
+                    delay = self._retry_backoff(rate_limit_streak)
+                    rate_limit_streak += 1
+                    if delay > 0:
+                        # The pause is backoff budget, not provider progress
+                        # budget: return it to the shared deadline.
+                        await asyncio.sleep(delay)
+                        progress_deadline += delay
+                else:
+                    rate_limit_streak = 0
                 next_target = candidates[index + 1]
                 self._trace_fallback_started(
                     request_id=request_id,

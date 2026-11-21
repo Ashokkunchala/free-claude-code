@@ -24,7 +24,7 @@ $HermesInstallUrl = "https://hermes-agent.nousresearch.com/install.ps1"
 $DshMinimumVersion = "0.2.0-rc.2"
 $DshPackage = "@deepseek-ai/dsh@latest"
 $GrokInstallUrl = "https://x.ai/cli/install.ps1"
-$MuseInstallUrl = "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install-muse.ps1"
+$MuseInstallUrl = "https://raw.githubusercontent.com/Ashokkunchala/free-claude-code/main/scripts/install-muse.ps1"
 $RtkVersion = "0.44.2"
 $RtkReleaseBaseUrl = "https://github.com/rtk-ai/rtk/releases/download/v$RtkVersion"
 $RtkWindowsAssetName = "rtk-x86_64-pc-windows-msvc.zip"
@@ -1443,14 +1443,17 @@ function Ensure-Uv {
 
 function Get-PackageSpec {
     if ($VoiceLocal) {
-        return "free-claude-code[voice_local]"
+        return "free-claude-code[voice_local] @ git+https://github.com/Ashokkunchala/free-claude-code@main"
     }
-    return "free-claude-code"
+    return "git+https://github.com/Ashokkunchala/free-claude-code@main"
 }
 
 function Install-FreeClaudeCode {
     Assert-NoFccProcessesRunning
     $packageSpec = Get-PackageSpec
+    if (-not $DryRun -and -not (Get-Command git -CommandType Application -ErrorAction SilentlyContinue)) {
+        throw "git is required to install Free Claude Code from source. Install git, then retry."
+    }
     $arguments = @(
         "tool",
         "install",
