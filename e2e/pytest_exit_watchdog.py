@@ -8,11 +8,17 @@ never arrive. The job then dies at its timeout with the suite fully green
 
 This wrapper streams the child's output, watches for pytest's final summary
 line, and force-kills the process tree GRACE_SECONDS after that line if the
-child has not exited, exiting with the verdict the summary reported. Without
-a summary line it never kills: the job-level timeout keeps bounding a suite
-that is genuinely stuck mid-run, and thread_dump_timeout keeps dumping
-diagnostics. On healthy runs this is a pure pass-through: stream output,
-propagate the child's exit code.
+child has not exited, exiting with the verdict the summary reported.
+
+The summary is not the only hang posture: a single test can hang mid-run in
+the same proactor close (PR #75 head 864b715d: one test stuck in the
+pytest_playwright fixture teardown, 68 minutes of total silence until the
+job-level cancel). A genuinely stuck suite produces no output at all, so the
+wrapper also force-kills the tree after SILENCE_SECONDS without a line of
+output and exits 1; healthy suites stream continuously, and pytest's own
+faulthandler dumps keep slow-but-alive tests from ever going silent that
+long. On healthy runs this is a pure pass-through: stream output, propagate
+the child's exit code.
 """
 
 import os
@@ -25,6 +31,7 @@ import time
 from typing import TextIO
 
 GRACE_SECONDS = 30.0
+SILENCE_SECONDS = 600.0
 
 _SUMMARY = re.compile(r"^=+ .*\bin \d")
 _FAILED = re.compile(r"\d+ (failed|error)")
@@ -48,6 +55,7 @@ def run_pytest_with_watchdog(
     argv: list[str],
     *,
     grace_seconds: float = GRACE_SECONDS,
+    silence_seconds: float = SILENCE_SECONDS,
     stream: TextIO | None = None,
     cwd: str | None = None,
 ) -> int:
@@ -66,13 +74,15 @@ def run_pytest_with_watchdog(
     child_out = proc.stdout
     summary_at: float | None = None
     verdict_failed = False
+    last_output_at = time.monotonic()
 
     def _reader() -> None:
-        nonlocal summary_at, verdict_failed
+        nonlocal summary_at, verdict_failed, last_output_at
         try:
             for line in child_out:
                 out.write(line)
                 out.flush()
+                last_output_at = time.monotonic()
                 if summary_at is None and _SUMMARY.search(line):
                     summary_at = time.monotonic()
                     verdict_failed = bool(_FAILED.search(line))
@@ -91,6 +101,17 @@ def run_pytest_with_watchdog(
             proc.wait(timeout=30)
             reader.join(timeout=5)
             return 1 if verdict_failed else 0
+        if summary_at is None and time.monotonic() - last_output_at >= silence_seconds:
+            out.write(
+                "[pytest-exit-watchdog] no output for "
+                f"{silence_seconds:.0f}s before a summary line; "
+                "killing the stuck process tree\n"
+            )
+            out.flush()
+            _kill_tree(proc)
+            proc.wait(timeout=30)
+            reader.join(timeout=5)
+            return 1
         time.sleep(0.2)
 
 

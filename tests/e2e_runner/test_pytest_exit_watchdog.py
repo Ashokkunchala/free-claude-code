@@ -75,6 +75,25 @@ def test_clean_failed_child_exit_code_passes_through(tmp_path: Path) -> None:
     assert code == 1
 
 
+def test_silent_stuck_child_is_killed_and_reports_failure(tmp_path: Path) -> None:
+    _write_suite(
+        tmp_path, "import time\n\ndef test_stuck():\n    time.sleep(600)\n", hang=False
+    )
+    out = io.StringIO()
+    start = time.monotonic()
+    code = run_pytest_with_watchdog(
+        ["test_fake.py", "-q", "-p", "no:cacheprovider"],
+        grace_seconds=0.5,
+        silence_seconds=0.5,
+        stream=out,
+        cwd=str(tmp_path),
+    )
+    elapsed = time.monotonic() - start
+    assert code == 1
+    assert "no output for" in out.getvalue()
+    assert elapsed < 60
+
+
 @pytest.mark.parametrize(
     "line",
     [
