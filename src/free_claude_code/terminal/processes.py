@@ -33,6 +33,32 @@ def pty_supported() -> bool:
     return os.name != "nt"
 
 
+#: Parent-held pty slave fds by child pid; see ``close_pty_slave``.
+_pty_slaves: dict[int, int] = {}
+
+
+def close_pty_slave(process: subprocess.Popen[bytes]) -> None:
+    """Close the parent-held pty slave fd, if one is open.
+
+    The parent keeps its copy of the slave open for the whole run so the
+    master cannot signal end-of-file before buffered child output is read:
+    the moment the LAST slave fd closes, the kernel lets a master read fail
+    with EIO, and on macOS that discards any undrained output - racing the
+    reader thread and losing bytes. Close this only after the child has
+    exited (or been killed); the master then drains in full before the
+    reader sees the stream end. Idempotent: the fd is forgotten first, so a
+    second call can never double-close a reused fd number.
+    """
+
+    if process.pid is None:
+        return
+    with _lock:
+        slave_fd = _pty_slaves.pop(process.pid, None)
+    if slave_fd is not None:
+        with contextlib.suppress(OSError):
+            os.close(slave_fd)
+
+
 def apply_terminal_size(master_fd: int) -> None:
     """Copy the caller's current terminal size onto a pty master (POSIX only).
 
@@ -104,7 +130,10 @@ def spawn(
     ``process.stdout`` with ``process.stderr`` set to None, so output arrives
     merged on one stream. The slave becomes the child's controlling terminal
     (so resizes arrive as SIGWINCH) and starts at the caller's current
-    terminal size instead of the kernel's 0x0 default.
+    terminal size instead of the kernel's 0x0 default. The parent keeps its
+    own slave fd open so the master cannot signal end-of-file before
+    buffered output is drained; the caller closes it with
+    ``close_pty_slave`` once the child has exited.
     """
 
     kwargs: dict[str, Any] = {}
@@ -149,11 +178,14 @@ def spawn(
                     os.close(fd)
         raise
     if master_fd is not None:
-        if slave_fd is not None:
-            with contextlib.suppress(OSError):
-                os.close(slave_fd)
         process.stdout = os.fdopen(master_fd, "rb", buffering=0)
         process.stderr = None
+        # Parent keeps the slave open until the child exits; the executor
+        # closes it via close_pty_slave before draining the master.
+        assert slave_fd is not None
+        if process.pid:
+            with _lock:
+                _pty_slaves[process.pid] = slave_fd
     if track and process.pid:
         with _lock:
             _tracked[process.pid] = process
