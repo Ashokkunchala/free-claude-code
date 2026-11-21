@@ -9,14 +9,16 @@ if os.name == "nt":
     import msvcrt
 
     def _try_lock(handle: BinaryIO) -> bool:
-        if os.fstat(handle.fileno()).st_size == 0:
-            handle.seek(0)
-            handle.write(b"\0")
-            handle.flush()
-        handle.seek(0)
         try:
+            if os.fstat(handle.fileno()).st_size == 0:
+                handle.seek(0)
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
             msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError:
+            # Either the region is already locked or another holder is still
+            # initializing the sentinel byte; both mean "not available now".
             return False
         return True
 
@@ -61,11 +63,17 @@ class InterprocessFileLock:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         handle = self._path.open("a+b")
         deadline = None if timeout is None else time.monotonic() + timeout
-        while not _try_lock(handle):
-            if not wait or (deadline is not None and time.monotonic() >= deadline):
-                handle.close()
-                return False
-            time.sleep(poll_interval)
+        try:
+            while not _try_lock(handle):
+                if not wait or (deadline is not None and time.monotonic() >= deadline):
+                    handle.close()
+                    return False
+                time.sleep(poll_interval)
+        except BaseException:
+            # Never leak the handle: an unclosed lock file surfaces as an
+            # unraisable finalizer warning in an unrelated test on Windows.
+            handle.close()
+            raise
         self._handle = handle
         return True
 
