@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Mapping
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -587,7 +588,7 @@ async def test_retryable_preframe_failure_selects_fallback_after_closing_primary
     assert order == ["fallback-resolved"]
     assert primary.stream_close_calls == 1
     assert fallback.stream_close_calls == 1
-    fallback_request = fallback.stream_calls[0]["request"]
+    fallback_request = cast(MessagesRequest, fallback.stream_calls[0]["request"])
     assert isinstance(fallback_request, MessagesRequest)
     assert fallback_request.model == "fallback-model"
     assert fallback.stream_calls[0] == {
@@ -816,7 +817,7 @@ async def test_primary_canonical_startup_failure_selects_fallback() -> None:
 
     assert [chunk async for chunk in stream] == ["fallback-frame"]
     assert primary.stream_calls == []
-    fallback_request = fallback.stream_calls[0]["request"]
+    fallback_request = cast(MessagesRequest, fallback.stream_calls[0]["request"])
     assert isinstance(fallback_request, MessagesRequest)
     assert fallback_request.model == "fallback-model"
 
@@ -1016,7 +1017,7 @@ async def test_candidate_requests_are_isolated_from_provider_mutation() -> None:
             request_id="req_isolated",
         )
     ]
-    fallback_request = fallback.stream_calls[0]["request"]
+    fallback_request = cast(MessagesRequest, fallback.stream_calls[0]["request"])
     assert isinstance(fallback_request, MessagesRequest)
     assert fallback_request.messages[0].content == "hello"
     assert routed.request.messages[0].content == "hello"
@@ -1453,7 +1454,7 @@ def _frame_data(frame: str) -> dict:
     raise AssertionError(f"frame without data: {frame!r}")
 
 
-def _resume_executor(providers: dict[str, FakeProvider]) -> ProviderExecutor:
+def _resume_executor(providers: Mapping[str, FakeProvider]) -> ProviderExecutor:
     return ProviderExecutor(
         AsyncMock(side_effect=providers.__getitem__),
         progress_timeout_seconds=60.0,
@@ -1506,7 +1507,7 @@ async def test_stream_resume_mid_text_cut_continues_on_fallback() -> None:
         _RESUME_MESSAGE_DELTA,
         _RESUME_MESSAGE_STOP,
     ]
-    fallback_request = fallback.stream_calls[0]["request"]
+    fallback_request = cast(MessagesRequest, fallback.stream_calls[0]["request"])
     last = fallback_request.messages[-1]
     assert last.role == "assistant"
     assert last.content == "Hello, wor"
@@ -1588,7 +1589,7 @@ async def test_stream_resume_mid_tool_block_leaks_no_partial_tool_call() -> None
         _RESUME_MESSAGE_STOP,
     ]
     # No prefill: nothing textual was emitted before the cut.
-    fallback_request = fallback.stream_calls[0]["request"]
+    fallback_request = cast(MessagesRequest, fallback.stream_calls[0]["request"])
     assert len(fallback_request.messages) == 1
 
 
@@ -1766,7 +1767,7 @@ async def test_stream_resume_chains_across_two_failovers() -> None:
         _RESUME_MESSAGE_DELTA,
         _RESUME_MESSAGE_STOP,
     ]
-    third_request = third.stream_calls[0]["request"]
+    third_request = cast(MessagesRequest, third.stream_calls[0]["request"])
     last = third_request.messages[-1]
     assert last.role == "assistant"
     assert last.content == "second candidate"
