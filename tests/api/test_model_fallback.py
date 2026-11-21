@@ -166,7 +166,7 @@ def test_lazy_fallback_validation_error_remains_ordinary(
     assert fallback.stream_models == []
 
 
-def test_postframe_failure_never_opens_fallback_for_streaming_messages() -> None:
+def test_postframe_failure_resumes_on_fallback_for_streaming_messages() -> None:
     first = format_sse_event(
         "message_start",
         {"type": "message_start", "message": {}},
@@ -175,15 +175,24 @@ def test_postframe_failure_never_opens_fallback_for_streaming_messages() -> None
         chunks_before_failure=(first,),
         failure=execution_failure("primary failed after start"),
     )
-    fallback = ControlledFallbackProvider(text="must not run")
+    fallback = ControlledFallbackProvider(text="resumed")
 
     with fallback_client(primary, fallback) as client:
         response = client.post("/v1/messages", json=messages_payload(stream=True))
 
     assert response.status_code == 200
     events = parse_sse_text(response.text)
-    assert [event.event for event in events] == ["error"]
-    assert fallback.stream_models == []
+    kinds = [event.event for event in events]
+    assert kinds.count("message_start") == 1
+    assert kinds[0] == "message_start"
+    assert kinds[-1] == "message_stop"
+    text = "".join(
+        event.data["delta"]["text"]
+        for event in events
+        if event.data.get("delta", {}).get("type") == "text_delta"
+    )
+    assert text == "resumed"
+    assert fallback.stream_models == ["fallback-model"]
 
 
 def test_postframe_failure_never_opens_fallback_for_responses() -> None:
