@@ -35,4 +35,7 @@ def record_request_failure(reason: str) -> None:
 
 def record_request_exception(error: BaseException) -> None:
     failure = find_execution_failure(error)
-    record_request_failure(failure.kind.value if failure else type(error).__name__)
+    if failure is None:
+        record_request_failure(type(error).__name__)
+    else:
+        record_request_failure(failure.wire_error_type or failure.kind.value)

@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Mapping
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,6 +16,7 @@ from free_claude_code.application.routing import (
     RoutedMessagesRequest,
     RoutedResponsesRequest,
 )
+from free_claude_code.application.stream_resume import AnthropicStreamResumePolicy
 from free_claude_code.config.reasoning import ReasoningPreference
 from free_claude_code.core.anthropic.models import Message, MessagesRequest
 from free_claude_code.core.anthropic.passthrough import NativeMessagesRequest
@@ -586,7 +588,7 @@ async def test_retryable_preframe_failure_selects_fallback_after_closing_primary
     assert order == ["fallback-resolved"]
     assert primary.stream_close_calls == 1
     assert fallback.stream_close_calls == 1
-    fallback_request = fallback.stream_calls[0]["request"]
+    fallback_request = cast(MessagesRequest, fallback.stream_calls[0]["request"])
     assert isinstance(fallback_request, MessagesRequest)
     assert fallback_request.model == "fallback-model"
     assert fallback.stream_calls[0] == {
@@ -680,7 +682,8 @@ async def test_multiple_retryable_failures_walk_fallbacks_in_order() -> None:
 
 
 @pytest.mark.asyncio
-async def test_empty_primary_completion_does_not_select_fallback() -> None:
+async def test_empty_primary_completion_selects_fallback() -> None:
+    # An empty completion is a failed response: the chain must keep working.
     primary = ControlledProvider([])
     fallback = FakeProvider()
     resolved_ids: list[str] = []
@@ -696,9 +699,10 @@ async def test_empty_primary_completion_does_not_select_fallback() -> None:
         request_id="req_empty_primary",
     )
 
-    assert [chunk async for chunk in stream] == []
-    assert resolved_ids == ["provider"]
+    assert [chunk async for chunk in stream] == ["event: message_stop\ndata: {}\n\n"]
+    assert resolved_ids == ["provider", "fallback"]
     assert primary.stream_close_calls == 1
+    assert fallback.stream_close_calls == 1
 
 
 @pytest.mark.asyncio
@@ -813,7 +817,7 @@ async def test_primary_canonical_startup_failure_selects_fallback() -> None:
 
     assert [chunk async for chunk in stream] == ["fallback-frame"]
     assert primary.stream_calls == []
-    fallback_request = fallback.stream_calls[0]["request"]
+    fallback_request = cast(MessagesRequest, fallback.stream_calls[0]["request"])
     assert isinstance(fallback_request, MessagesRequest)
     assert fallback_request.model == "fallback-model"
 
@@ -1013,7 +1017,7 @@ async def test_candidate_requests_are_isolated_from_provider_mutation() -> None:
             request_id="req_isolated",
         )
     ]
-    fallback_request = fallback.stream_calls[0]["request"]
+    fallback_request = cast(MessagesRequest, fallback.stream_calls[0]["request"])
     assert isinstance(fallback_request, MessagesRequest)
     assert fallback_request.messages[0].content == "hello"
     assert routed.request.messages[0].content == "hello"
@@ -1286,6 +1290,9 @@ async def test_fallback_transition_does_not_reset_shared_progress_deadline() -> 
     executor = ProviderExecutor(
         AsyncMock(side_effect=providers.__getitem__),
         progress_timeout_seconds=60,
+        # Zero backoff keeps the deadline arithmetic in this test exact; the
+        # backoff's own deadline accounting is covered separately.
+        retry_backoff=lambda _attempt: 0.0,
     )
     stream = executor.stream_messages(
         _routed_request(_target("fallback", "model")),
@@ -1379,3 +1386,473 @@ async def test_cancelling_progress_wait_remains_cancellation() -> None:
 
     assert provider.stream_close_calls == 1
     assert resolved_ids == ["provider"]
+
+
+def _sse(event: str, data: dict) -> str:
+    import json
+
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+_RESUME_MESSAGE_START = _sse(
+    "message_start",
+    {
+        "type": "message_start",
+        "message": {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "content": [],
+            "model": "provider-model",
+            "usage": {"input_tokens": 3, "output_tokens": 1},
+        },
+    },
+)
+_RESUME_MESSAGE_DELTA = _sse(
+    "message_delta",
+    {
+        "type": "message_delta",
+        "delta": {"stop_reason": "end_turn"},
+        "usage": {"output_tokens": 7},
+    },
+)
+_RESUME_MESSAGE_STOP = _sse("message_stop", {"type": "message_stop"})
+
+
+def _resume_text_start(index: int = 0) -> str:
+    return _sse(
+        "content_block_start",
+        {
+            "type": "content_block_start",
+            "index": index,
+            "content_block": {"type": "text", "text": ""},
+        },
+    )
+
+
+def _resume_text_delta(text: str, index: int = 0) -> str:
+    return _sse(
+        "content_block_delta",
+        {
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {"type": "text_delta", "text": text},
+        },
+    )
+
+
+def _resume_block_stop(index: int = 0) -> str:
+    return _sse("content_block_stop", {"type": "content_block_stop", "index": index})
+
+
+def _frame_data(frame: str) -> dict:
+    import json
+
+    for line in frame.splitlines():
+        if line.startswith("data: "):
+            return json.loads(line.removeprefix("data: "))
+    raise AssertionError(f"frame without data: {frame!r}")
+
+
+def _resume_executor(providers: Mapping[str, FakeProvider]) -> ProviderExecutor:
+    return ProviderExecutor(
+        AsyncMock(side_effect=providers.__getitem__),
+        progress_timeout_seconds=60.0,
+        retry_backoff=lambda _attempt: 0.0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_resume_mid_text_cut_continues_on_fallback() -> None:
+    primary = ControlledProvider(
+        [
+            _RESUME_MESSAGE_START,
+            _resume_text_start(),
+            _resume_text_delta("Hello, wor"),
+            ExecutionFailure(
+                kind=FailureKind.RATE_LIMIT,
+                status_code=429,
+                message="rate limited",
+                retryable=True,
+            ),
+        ]
+    )
+    fallback = ControlledProvider(
+        [
+            _RESUME_MESSAGE_START,
+            _resume_text_start(),
+            _resume_text_delta("Hello, world!"),
+            _resume_block_stop(),
+            _RESUME_MESSAGE_DELTA,
+            _RESUME_MESSAGE_STOP,
+        ]
+    )
+    executor = _resume_executor({"provider": primary, "fallback": fallback})
+    stream = executor.stream_messages(
+        _routed_request(_target("fallback", "fallback-model")),
+        raw_log_payload=dict,
+        request_id="req_resume_mid_text",
+        resume_policy=AnthropicStreamResumePolicy(),
+    )
+
+    frames = [chunk async for chunk in stream]
+
+    assert frames == [
+        _RESUME_MESSAGE_START,
+        _resume_text_start(),
+        _resume_text_delta("Hello, wor"),
+        # Only the continuation past the repeated prefill reaches the client.
+        _resume_text_delta("ld!"),
+        _resume_block_stop(),
+        _RESUME_MESSAGE_DELTA,
+        _RESUME_MESSAGE_STOP,
+    ]
+    fallback_request = cast(MessagesRequest, fallback.stream_calls[0]["request"])
+    last = fallback_request.messages[-1]
+    assert last.role == "assistant"
+    assert last.content == "Hello, wor"
+
+
+@pytest.mark.asyncio
+async def test_stream_resume_mid_tool_block_leaks_no_partial_tool_call() -> None:
+    partial_json = _sse(
+        "content_block_delta",
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": '{"command": "ls'},
+        },
+    )
+    tool_start = _sse(
+        "content_block_start",
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "Bash",
+                "input": {},
+            },
+        },
+    )
+    full_json = _sse(
+        "content_block_delta",
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {
+                "type": "input_json_delta",
+                "partial_json": '{"command": "ls"}',
+            },
+        },
+    )
+    primary = ControlledProvider(
+        [
+            _RESUME_MESSAGE_START,
+            tool_start,
+            partial_json,
+            ExecutionFailure(
+                kind=FailureKind.UPSTREAM,
+                status_code=502,
+                message="cut mid tool call",
+                retryable=True,
+            ),
+        ]
+    )
+    fallback = ControlledProvider(
+        [
+            _RESUME_MESSAGE_START,
+            tool_start,
+            full_json,
+            _resume_block_stop(),
+            _RESUME_MESSAGE_DELTA,
+            _RESUME_MESSAGE_STOP,
+        ]
+    )
+    executor = _resume_executor({"provider": primary, "fallback": fallback})
+    stream = executor.stream_messages(
+        _routed_request(_target("fallback", "fallback-model")),
+        raw_log_payload=dict,
+        request_id="req_resume_mid_tool",
+        resume_policy=AnthropicStreamResumePolicy(),
+    )
+
+    frames = [chunk async for chunk in stream]
+
+    assert frames == [
+        _RESUME_MESSAGE_START,
+        tool_start,
+        full_json,
+        _resume_block_stop(),
+        _RESUME_MESSAGE_DELTA,
+        _RESUME_MESSAGE_STOP,
+    ]
+    # No prefill: nothing textual was emitted before the cut.
+    fallback_request = cast(MessagesRequest, fallback.stream_calls[0]["request"])
+    assert len(fallback_request.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_resume_closes_an_open_thinking_block_before_continuing() -> None:
+    thinking_start = _sse(
+        "content_block_start",
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "thinking", "thinking": ""},
+        },
+    )
+    thinking_delta = _sse(
+        "content_block_delta",
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": "hmm"},
+        },
+    )
+    primary = ControlledProvider(
+        [
+            _RESUME_MESSAGE_START,
+            thinking_start,
+            thinking_delta,
+            ExecutionFailure(
+                kind=FailureKind.OVERLOADED,
+                status_code=529,
+                message="overloaded",
+                retryable=True,
+            ),
+        ]
+    )
+    fallback = ControlledProvider(
+        [
+            _RESUME_MESSAGE_START,
+            _resume_text_start(),
+            _resume_text_delta("answer"),
+            _resume_block_stop(),
+            _RESUME_MESSAGE_DELTA,
+            _RESUME_MESSAGE_STOP,
+        ]
+    )
+    executor = _resume_executor({"provider": primary, "fallback": fallback})
+    stream = executor.stream_messages(
+        _routed_request(_target("fallback", "fallback-model")),
+        raw_log_payload=dict,
+        request_id="req_resume_thinking",
+        resume_policy=AnthropicStreamResumePolicy(),
+    )
+
+    frames = [chunk async for chunk in stream]
+
+    assert frames[:3] == [_RESUME_MESSAGE_START, thinking_start, thinking_delta]
+    # The open thinking block is closed before the fallback's text begins.
+    assert _frame_data(frames[3]) == {"type": "content_block_stop", "index": 0}
+    assert _frame_data(frames[4])["index"] == 1
+    assert frames[5] == _resume_text_delta("answer", 1)
+    assert frames[6] == _resume_block_stop(1)
+    assert frames[7:] == [_RESUME_MESSAGE_DELTA, _RESUME_MESSAGE_STOP]
+
+
+@pytest.mark.asyncio
+async def test_stream_resume_after_a_delivered_tool_block_raises() -> None:
+    tool_start = _sse(
+        "content_block_start",
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "Bash",
+                "input": {},
+            },
+        },
+    )
+    full_json = _sse(
+        "content_block_delta",
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": "{}"},
+        },
+    )
+    failure = ExecutionFailure(
+        kind=FailureKind.RATE_LIMIT,
+        status_code=429,
+        message="limited after tool call",
+        retryable=True,
+    )
+    primary = ControlledProvider(
+        [_RESUME_MESSAGE_START, tool_start, full_json, _resume_block_stop(), failure]
+    )
+    fallback = ControlledProvider([_RESUME_MESSAGE_START, _RESUME_MESSAGE_STOP])
+    executor = _resume_executor({"provider": primary, "fallback": fallback})
+    stream = executor.stream_messages(
+        _routed_request(_target("fallback", "fallback-model")),
+        raw_log_payload=dict,
+        request_id="req_resume_unsafe",
+        resume_policy=AnthropicStreamResumePolicy(),
+    )
+
+    frames: list[str] = []
+    with pytest.raises(ExecutionFailure, match="limited after tool call"):
+        while True:
+            frames.append(await anext(stream))
+
+    # The delivered prefix is intact, and the fallback was never touched.
+    assert frames == [
+        _RESUME_MESSAGE_START,
+        tool_start,
+        full_json,
+        _resume_block_stop(),
+    ]
+    assert fallback.stream_calls == []
+
+
+@pytest.mark.asyncio
+async def test_stream_resume_chains_across_two_failovers() -> None:
+    primary = ControlledProvider(
+        [
+            ExecutionFailure(
+                kind=FailureKind.RATE_LIMIT,
+                status_code=429,
+                message="primary limited",
+                retryable=True,
+            )
+        ]
+    )
+    second = ControlledProvider(
+        [
+            _RESUME_MESSAGE_START,
+            _resume_text_start(),
+            _resume_text_delta("second candidate "),
+            ExecutionFailure(
+                kind=FailureKind.OVERLOADED,
+                status_code=529,
+                message="second overloaded",
+                retryable=True,
+            ),
+        ]
+    )
+    third = ControlledProvider(
+        [
+            _RESUME_MESSAGE_START,
+            _resume_text_start(),
+            _resume_text_delta("second candidate wins"),
+            _resume_block_stop(),
+            _RESUME_MESSAGE_DELTA,
+            _RESUME_MESSAGE_STOP,
+        ]
+    )
+    providers = {"provider": primary, "second": second, "third": third}
+    executor = _resume_executor(providers)
+    stream = executor.stream_messages(
+        _routed_request(
+            _target("second", "second-model"),
+            _target("third", "third-model"),
+        ),
+        raw_log_payload=dict,
+        request_id="req_resume_chain",
+        resume_policy=AnthropicStreamResumePolicy(),
+    )
+
+    frames = [chunk async for chunk in stream]
+
+    assert frames == [
+        _RESUME_MESSAGE_START,
+        _resume_text_start(),
+        _resume_text_delta("second candidate "),
+        _resume_text_delta("wins"),
+        _resume_block_stop(),
+        _RESUME_MESSAGE_DELTA,
+        _RESUME_MESSAGE_STOP,
+    ]
+    third_request = cast(MessagesRequest, third.stream_calls[0]["request"])
+    last = third_request.messages[-1]
+    assert last.role == "assistant"
+    assert last.content == "second candidate"
+
+
+@pytest.mark.asyncio
+async def test_stream_resume_empty_completion_fails_over_with_policy() -> None:
+    primary = ControlledProvider([_RESUME_MESSAGE_START, _RESUME_MESSAGE_STOP])
+    fallback = ControlledProvider(
+        [
+            _RESUME_MESSAGE_START,
+            _resume_text_start(),
+            _resume_text_delta("real answer"),
+            _resume_block_stop(),
+            _RESUME_MESSAGE_DELTA,
+            _RESUME_MESSAGE_STOP,
+        ]
+    )
+    executor = _resume_executor({"provider": primary, "fallback": fallback})
+    stream = executor.stream_messages(
+        _routed_request(_target("fallback", "fallback-model")),
+        raw_log_payload=dict,
+        request_id="req_resume_empty",
+        resume_policy=AnthropicStreamResumePolicy(),
+    )
+
+    frames = [chunk async for chunk in stream]
+
+    # One message_start total: the fallback's is spliced out.
+    assert frames == [
+        _RESUME_MESSAGE_START,
+        _resume_text_start(),
+        _resume_text_delta("real answer"),
+        _resume_block_stop(),
+        _RESUME_MESSAGE_DELTA,
+        _RESUME_MESSAGE_STOP,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_backoff_sleeps_between_candidates() -> None:
+    primary = ControlledProvider(
+        [
+            ExecutionFailure(
+                kind=FailureKind.RATE_LIMIT,
+                status_code=429,
+                message="limited",
+                retryable=True,
+            )
+        ]
+    )
+    fallback = ControlledProvider(
+        [
+            _RESUME_MESSAGE_START,
+            _resume_text_start(),
+            _resume_text_delta("done"),
+            _resume_block_stop(),
+            _RESUME_MESSAGE_DELTA,
+            _RESUME_MESSAGE_STOP,
+        ]
+    )
+    executor = ProviderExecutor(
+        AsyncMock(side_effect={"provider": primary, "fallback": fallback}.__getitem__),
+        progress_timeout_seconds=60.0,
+        retry_backoff=lambda _attempt: 2.5,
+    )
+    stream = executor.stream_messages(
+        _routed_request(_target("fallback", "fallback-model")),
+        raw_log_payload=dict,
+        request_id="req_backoff_sleep",
+        resume_policy=AnthropicStreamResumePolicy(),
+    )
+
+    with patch(
+        "free_claude_code.application.execution.asyncio.sleep",
+        new=AsyncMock(),
+    ) as sleep_mock:
+        frames = [chunk async for chunk in stream]
+
+    assert frames == [
+        _RESUME_MESSAGE_START,
+        _resume_text_start(),
+        _resume_text_delta("done"),
+        _resume_block_stop(),
+        _RESUME_MESSAGE_DELTA,
+        _RESUME_MESSAGE_STOP,
+    ]
+    sleep_mock.assert_awaited_once_with(2.5)
