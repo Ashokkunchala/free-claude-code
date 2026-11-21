@@ -194,7 +194,7 @@ def test_shared_setup_installs_dependencies_except_for_post_merge_jobs() -> None
 
 def test_windows_playwright_gets_a_longer_job_timeout() -> None:
     """Overnight Windows runner degradation cancelled 15-minute jobs (PRs 48-50);
-    the suite itself now runs ~24 minutes there, so the budget needs headroom.
+    the suite itself now runs ~50 minutes there (2965s measured, PR 75), so the budget needs headroom.
     """
     workflow = yaml.safe_load(UV_WORKFLOWS[0].read_text(encoding="utf-8"))
     job = workflow["jobs"]["playwright"]
@@ -202,4 +202,4 @@ def test_windows_playwright_gets_a_longer_job_timeout() -> None:
     timeouts = {
         entry["os"]: entry["timeout"] for entry in job["strategy"]["matrix"]["include"]
     }
-    assert timeouts == {"Linux": 15, "Windows": 50, "macOS": 15}
+    assert timeouts == {"Linux": 15, "Windows": 75, "macOS": 15}
