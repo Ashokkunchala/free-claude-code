@@ -134,3 +134,6 @@ def test_close_pty_slave_is_idempotent():
             process.stdout.close()
         if process.poll() is None:
             processes.kill_tree(process)
+        # spawn(track=True by default) registered the child; release it so
+        # later tracked_pids() assertions in this worker see a clean table.
+        processes.untrack(process)
