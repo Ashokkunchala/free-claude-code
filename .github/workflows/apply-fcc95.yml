@@ -1,0 +1,29 @@
+name: apply-fcc95
+on:
+  push:
+    branches: [chore/apply-fcc95]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/windows-lock-flakes
+          fetch-depth: 0
+      - name: Restore raw blob bytes in worktree
+        run: |
+          git config core.autocrlf false
+          git rm -r -q --cached .
+          git reset -q --hard
+      - name: Decode patch
+        run: echo 'RnJvbSA1NmU4ODg2NTdmMDQxZTg3YTdiZmEzYTliZTE3ZWZiNzViNDk0ZWUzIE1vbiBTZXAgMTcgMDA6MDA6MDAgMjAwMQpGcm9tOiBmY2MtYWdlbnQgPGZjYy1hZ2VudEBsb2NhbGhvc3Q+CkRhdGU6IFNhdCwgMjEgTm92IDIwMjYgMTM6MDA6NTkgKzA1MzAKU3ViamVjdDogW1BBVENIXSBwYXRjaDogdHlwZSB0aGUgcmFjeS1oYW5kbGUgbG9jayB0ZXN0IGRvdWJsZQoKLS0tCiB0ZXN0cy9jb3JlL3Rlc3RfaW50ZXJwcm9jZXNzX2xvY2sucHkgfCA1ICsrKy0tCiAxIGZpbGUgY2hhbmdlZCwgMyBpbnNlcnRpb25zKCspLCAyIGRlbGV0aW9ucygtKQoKZGlmZiAtLWdpdCBhL3Rlc3RzL2NvcmUvdGVzdF9pbnRlcnByb2Nlc3NfbG9jay5weSBiL3Rlc3RzL2NvcmUvdGVzdF9pbnRlcnByb2Nlc3NfbG9jay5weQppbmRleCAzNDRiYjhjLi44NWMyODk5IDEwMDY0NAotLS0gYS90ZXN0cy9jb3JlL3Rlc3RfaW50ZXJwcm9jZXNzX2xvY2sucHkKKysrIGIvdGVzdHMvY29yZS90ZXN0X2ludGVycHJvY2Vzc19sb2NrLnB5CkBAIC00LDYgKzQsNyBAQCBpbXBvcnQgb3MKIGltcG9ydCB0aHJlYWRpbmcKIGZyb20gY29uY3VycmVudC5mdXR1cmVzIGltcG9ydCBUaHJlYWRQb29sRXhlY3V0b3IKIGZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAorZnJvbSB0eXBpbmcgaW1wb3J0IEJpbmFyeUlPLCBjYXN0CiAKIGltcG9ydCBweXRlc3QKIApAQCAtMTAyLDcgKzEwMyw3IEBAIGRlZiB0ZXN0X3dpbmRvd3NfdHJ5X2xvY2tfdHJlYXRzX2NvbnRlbnRpb25fYXNfdW5hdmFpbGFibGUoCiAKICAgICBtb25rZXlwYXRjaC5zZXRhdHRyKG1zdmNydCwgImxvY2tpbmciLCBkZW5pZWQpCiAgICAgdHJ5OgotICAgICAgICBhc3NlcnQgaW50ZXJwcm9jZXNzX2xvY2suX3RyeV9sb2NrKGhhbmRsZSkgaXMgRmFsc2UKKyAgICAgICAgYXNzZXJ0IGludGVycHJvY2Vzc19sb2NrLl90cnlfbG9jayhjYXN0KEJpbmFyeUlPLCBoYW5kbGUpKSBpcyBGYWxzZQogICAgIGZpbmFsbHk6CiAgICAgICAgIGhhbmRsZS5jbG9zZSgpCiAKQEAgLTEzNSw2ICsxMzYsNiBAQCBkZWYgdGVzdF93aW5kb3dzX3RyeV9sb2NrX3RvbGVyYXRlc190aGVfc2VudGluZWxfaW5pdGlhbGl6YXRpb25fcmFjZSgKIAogICAgIGhhbmRsZSA9IFJhY3lIYW5kbGUodG1wX3BhdGggLyAiY2hhdC5sb2NrIikKICAgICB0cnk6Ci0gICAgICAgIGFzc2VydCBpbnRlcnByb2Nlc3NfbG9jay5fdHJ5X2xvY2soaGFuZGxlKSBpcyBGYWxzZQorICAgICAgICBhc3NlcnQgaW50ZXJwcm9jZXNzX2xvY2suX3RyeV9sb2NrKGNhc3QoQmluYXJ5SU8sIGhhbmRsZSkpIGlzIEZhbHNlCiAgICAgZmluYWxseToKICAgICAgICAgaGFuZGxlLmNsb3NlKCkKLS0gCjIuMzQuMQoK' | base64 -d > /tmp/series.patch
+      - name: Apply series
+        run: |
+          git config user.name "fcc-apply-bot"
+          git config user.email "fcc-apply-bot@users.noreply.github.com"
+          git am --keep-cr --whitespace=nowarn /tmp/series.patch
+      - name: Push branch
+        run: |
+          git push origin HEAD:fix/windows-lock-flakes
