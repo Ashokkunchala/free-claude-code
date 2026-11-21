@@ -53,3 +53,33 @@ To permit a currently denied target, add its host to `FCC_NETWORK_ALLOW`
 and retry. To pin traffic to one provider during an incident, set for
 example `FCC_NETWORK_EGRESS=allowlist` with
 `FCC_NETWORK_ALLOW=api.anthropic.com`.
+
+## Security controls, persistence and privilege bits
+
+Roadmap section 7 also requires that the agent never disables security
+controls, never creates hidden persistence and never opens covert remote
+access channels. The policy engine enforces these as classifications plus
+one hard denial:
+
+- `deny:security-control` refuses operations that weaken host defences:
+  `setenforce 0/permissive`, `ufw disable/reset`, firewall flushes
+  (`iptables -F/-X/-P`, `nft flush`, `netsh advfirewall ... off`) and
+  endpoint-protection toggles (`Set-MpPreference -Disable*`). Like the
+  elevation denial it cannot be bypassed by approval or `extra_allow`.
+- Persistence writes need detailed R3 approval: cron (`crontab -e/-r`),
+  `at`/`batch`, `schtasks /create|/change|/delete`, `launchctl
+  load/bootstrap/enable`, `systemctl enable/disable/mask`, SysV init
+  helpers (`chkconfig`, `update-rc.d`, `rc-update`) and Windows autorun
+  registry keys (`...\CurrentVersion\Run*`). Their read-only views
+  (`crontab -l`, `atq`, `schtasks /query`, `launchctl list`, `systemctl
+  status/is-enabled`, `reg query`) stay R0.
+- Account and credential administration is R3: `useradd`/`userdel`/
+  `usermod`/`passwd`/`chpasswd`/`visudo` and `net user|localgroup` writes;
+  the matching read views stay R0.
+- `chmod` with setuid/setgid bits (`u+s`, `4755`, ...) is R3; ordinary
+  mode changes stay R1.
+- Remote-access channels that can act as covert entry points are R3:
+  `ssh -R`/`-D` tunnels, `nc`/`ncat` `-e`/`-c` command channels and
+  `socat EXEC:`/`SYSTEM:` addresses. Plain `ssh` and listeners stay R2.
+- `git config core.hooksPath` is R3: hooks execute arbitrary commands on
+  ordinary git operations, so retargeting them is a persistence vector.

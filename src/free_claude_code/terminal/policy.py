@@ -428,6 +428,198 @@ def _classify_find(args: tuple[str, ...]) -> tuple[RiskLevel, str]:
     return RiskLevel.R0_READ_ONLY, "find:read"
 
 
+_ACCOUNT_ADMIN = frozenset(
+    {"chpasswd", "dscl", "passwd", "useradd", "userdel", "usermod", "visudo"}
+)
+
+_FIREWALL_TOOLS = frozenset({"ip6tables", "iptables", "netsh", "nft", "ufw"})
+
+_IPTABLES_READ_FLAGS = frozenset({"-L", "-S", "--list", "--list-rules"})
+
+_IPTABLES_FLUSH_FLAGS = frozenset({"-F", "-X", "-P", "--flush", "--delete-chain"})
+
+_PERSISTENCE_SYSTEMCTL = frozenset(
+    {"disable", "enable", "link", "mask", "preset", "unmask"}
+)
+
+_INIT_PERSISTENCE = frozenset({"chkconfig", "rc-update", "update-rc.d"})
+
+_NET_SHELL_TOOLS = frozenset({"nc", "ncat", "netcat", "socat"})
+
+_SECURITY_READ_COMMANDS = frozenset({"getenforce", "get-mppreference", "sestatus"})
+
+
+def _chmod_has_privilege_bits(args: tuple[str, ...]) -> bool:
+    for arg in args:
+        if arg.startswith("-"):
+            continue
+        if arg.isdigit():
+            # Four-digit octal modes carry setuid/setgid/sticky in the first
+            # digit; sticky alone (1xxx) is benign, setuid/setgid are not.
+            if len(arg) == 4 and arg[0] in "234567":
+                return True
+            continue
+        for clause in arg.split(","):
+            plus = clause.find("+")
+            equals = clause.find("=")
+            op = plus if plus >= 0 else equals
+            if op >= 0 and "s" in clause[op + 1 :]:
+                return True
+    return False
+
+
+def _classify_firewall(name: str, args: tuple[str, ...]) -> tuple[RiskLevel, str]:
+    """Firewall tools: reads are R0, flushes are denied, other writes R2."""
+    flags = _flags(args)
+    lowered = [arg.lower() for arg in args]
+    verbs = [arg for arg in lowered if not arg.startswith("-")]
+    if name == "ufw":
+        if verbs and verbs[0] in ("status", "show"):
+            return RiskLevel.R0_READ_ONLY, "ufw:read"
+        if verbs and verbs[0] in ("disable", "reset"):
+            # The engine's security-control verdict denies these outright.
+            return RiskLevel.R3_DESTRUCTIVE, "ufw:disable"
+        return RiskLevel.R2_PRIVILEGED, "ufw:write"
+    if name == "nft":
+        if verbs and verbs[0] == "list":
+            return RiskLevel.R0_READ_ONLY, "nft:read"
+        if verbs and verbs[0] == "flush":
+            return RiskLevel.R3_DESTRUCTIVE, "nft:flush"
+        return RiskLevel.R2_PRIVILEGED, "nft:write"
+    if name == "netsh":
+        joined = " ".join(lowered)
+        if "advfirewall" in joined and "set" in verbs and joined.endswith(" off"):
+            return RiskLevel.R3_DESTRUCTIVE, "netsh:firewall-off"
+        if "show" in verbs:
+            return RiskLevel.R0_READ_ONLY, "netsh:read"
+        return RiskLevel.R2_PRIVILEGED, "netsh:write"
+    # iptables / ip6tables
+    if flags & _IPTABLES_FLUSH_FLAGS:
+        return RiskLevel.R3_DESTRUCTIVE, f"{name}:flush"
+    if flags & _IPTABLES_READ_FLAGS or not args:
+        return RiskLevel.R0_READ_ONLY, f"{name}:read"
+    return RiskLevel.R2_PRIVILEGED, f"{name}:write"
+
+
+def _classify_persistence(name: str, args: tuple[str, ...]) -> tuple[RiskLevel, str]:
+    """Schedulers, service managers and autorun stores (persistence)."""
+    flags = _flags(args)
+    lowered = [arg.lower() for arg in args]
+    verbs = [arg for arg in lowered if not arg.startswith("-")]
+    if name == "crontab":
+        if "-l" in flags or not args:
+            return RiskLevel.R0_READ_ONLY, "crontab:read"
+        return RiskLevel.R3_DESTRUCTIVE, "crontab:write"
+    if name in ("at", "batch"):
+        return RiskLevel.R3_DESTRUCTIVE, f"{name}:submit"
+    if name == "atq":
+        return RiskLevel.R0_READ_ONLY, "atq:read"
+    if name == "atrm":
+        return RiskLevel.R2_PRIVILEGED, "atrm:delete"
+    if name == "schtasks":
+        if not verbs or "/query" in verbs:
+            return RiskLevel.R0_READ_ONLY, "schtasks:read"
+        if verbs[0] in ("/create", "/change", "/delete"):
+            return RiskLevel.R3_DESTRUCTIVE, "schtasks:write"
+        return RiskLevel.R2_PRIVILEGED, "schtasks:control"
+    if name == "launchctl":
+        if verbs and verbs[0] in ("list", "print", "print-disabled", "blame"):
+            return RiskLevel.R0_READ_ONLY, "launchctl:read"
+        if verbs and verbs[0] in (
+            "load",
+            "unload",
+            "bootstrap",
+            "bootout",
+            "enable",
+            "disable",
+        ):
+            return RiskLevel.R3_DESTRUCTIVE, "launchctl:persist"
+        return RiskLevel.R2_PRIVILEGED, "launchctl:control"
+    if name == "reg":
+        if verbs and verbs[0] == "query":
+            return RiskLevel.R0_READ_ONLY, "reg:read"
+        joined = " ".join(lowered)
+        if verbs and verbs[0] in ("add", "delete") and "currentversion\\run" in joined:
+            return RiskLevel.R3_DESTRUCTIVE, "reg:autorun"
+        return RiskLevel.R2_PRIVILEGED, "reg:write"
+    if name in _INIT_PERSISTENCE:
+        if not verbs or any("list" in verb for verb in verbs):
+            return RiskLevel.R0_READ_ONLY, f"{name}:read"
+        return RiskLevel.R3_DESTRUCTIVE, f"{name}:write"
+    return RiskLevel.R2_PRIVILEGED, f"{name}:unknown"
+
+
+def _classify_net(args: tuple[str, ...]) -> tuple[RiskLevel, str]:
+    """Windows net: account and group administration vs read-only views."""
+    lowered = [arg.lower() for arg in args]
+    if not lowered:
+        return RiskLevel.R0_READ_ONLY, "net:help"
+    sub = lowered[0]
+    if sub not in ("user", "localgroup", "group"):
+        return RiskLevel.R2_PRIVILEGED, f"net:{sub}"
+    nonflags = [arg for arg in lowered[1:] if not arg.startswith("/")]
+    writes = "/add" in lowered or "/delete" in lowered
+    if sub == "user" and (writes or len(nonflags) >= 2):
+        return RiskLevel.R3_DESTRUCTIVE, "net:account-admin"
+    if sub in ("localgroup", "group") and (writes or len(nonflags) >= 2):
+        return RiskLevel.R3_DESTRUCTIVE, "net:group-admin"
+    return RiskLevel.R0_READ_ONLY, f"net:{sub}-read"
+
+
+def _classify_net_shell(name: str, args: tuple[str, ...]) -> tuple[RiskLevel, str]:
+    """nc/socat: command channels (-e/-c, EXEC:) are shell backdoors."""
+    flags = _flags(args)
+    if flags & frozenset({"-e", "-c"}):
+        return RiskLevel.R3_DESTRUCTIVE, f"{name}:shell-channel"
+    if name == "socat" and any(
+        arg.upper().startswith(("EXEC:", "SYSTEM:")) for arg in args
+    ):
+        return RiskLevel.R3_DESTRUCTIVE, "socat:shell-channel"
+    return RiskLevel.R2_PRIVILEGED, f"{name}:channel"
+
+
+def _security_control_verdict(argv: tuple[str, ...]) -> PolicyVerdict | None:
+    """Deny operations that disable host security controls outright.
+
+    Mirrors the elevation denial: the boundary is not approval-bypassable
+    because an approval prompt must not launder a control downgrade.
+    """
+    name = _basename(argv[0])
+    args = argv[1:]
+    flags = _flags(args)
+    lowered = [arg.lower() for arg in args]
+    verbs = [arg for arg in lowered if not arg.startswith("-")]
+    hit: str | None = None
+    if name == "setenforce":
+        if not verbs or verbs[0] in ("0", "permissive"):
+            hit = "SELinux permissive mode"
+    elif name == "ufw":
+        if verbs and verbs[0] in ("disable", "reset"):
+            hit = "disabling the firewall"
+    elif name in ("iptables", "ip6tables"):
+        if flags & _IPTABLES_FLUSH_FLAGS:
+            hit = "flushing firewall rules"
+    elif name == "nft":
+        if verbs and verbs[0] == "flush":
+            hit = "flushing firewall rules"
+    elif name == "netsh":
+        joined = " ".join(lowered)
+        if "advfirewall" in joined and "set" in verbs and joined.endswith(" off"):
+            hit = "disabling the firewall"
+    elif name == "set-mppreference" and any(
+        arg.lower().startswith("-disable") for arg in args
+    ):
+        hit = "disabling endpoint protection"
+    if hit is None:
+        return None
+    return PolicyVerdict(
+        level=RiskLevel.R3_DESTRUCTIVE,
+        requirement=Requirement.DENY,
+        reason=f"security controls are never weakened: {hit}",
+        policy_id="deny:security-control",
+    )
+
+
 def _classify_git(args: tuple[str, ...]) -> tuple[RiskLevel, str]:
     if not args:
         return RiskLevel.R0_READ_ONLY, "git:help"
@@ -460,6 +652,11 @@ def _classify_git(args: tuple[str, ...]) -> tuple[RiskLevel, str]:
         if rest and rest[0] in ("list", "show"):
             return RiskLevel.R0_READ_ONLY, "git:stash-read"
         return RiskLevel.R1_REVERSIBLE, "git:stash-save"
+    if sub == "config":
+        keys = [arg for arg in rest if not arg.startswith("-")]
+        if keys and keys[0].lower() == "core.hookspath":
+            return RiskLevel.R3_DESTRUCTIVE, "git:hooks-path"
+        return RiskLevel.R2_PRIVILEGED, "git:config"
     if sub == "rm":
         return RiskLevel.R2_PRIVILEGED, "git:rm"
     if sub == "rebase":
@@ -523,6 +720,8 @@ def _classify_verb_command(name: str, args: tuple[str, ...]) -> tuple[RiskLevel,
             return RiskLevel.R0_READ_ONLY, f"{name}:read"
         return RiskLevel.R2_PRIVILEGED, f"{name}:write"
     if name in ("systemctl", "service"):
+        if name == "systemctl" and verbs and verbs[0] in _PERSISTENCE_SYSTEMCTL:
+            return RiskLevel.R3_DESTRUCTIVE, "systemctl:persist"
         if verbs and any(verb in _READ_VERBS for verb in verbs):
             return RiskLevel.R0_READ_ONLY, f"{name}:read"
         return RiskLevel.R2_PRIVILEGED, f"{name}:write"
@@ -587,6 +786,43 @@ def classify(argv: tuple[str, ...]) -> tuple[RiskLevel, str]:
         return _classify_verb_command(name, args)
     if name in _PACKAGE_MANAGERS or name in _BUILD_TOOL_MANAGERS:
         return _classify_package_manager(name, args)
+    if name == "chmod":
+        if _chmod_has_privilege_bits(args):
+            return RiskLevel.R3_DESTRUCTIVE, "chmod:privilege-bits"
+        return RiskLevel.R1_REVERSIBLE, "chmod"
+    if name in _ACCOUNT_ADMIN:
+        return RiskLevel.R3_DESTRUCTIVE, f"account:{name}"
+    if name in _FIREWALL_TOOLS:
+        return _classify_firewall(name, args)
+    if name in _SECURITY_READ_COMMANDS:
+        return RiskLevel.R0_READ_ONLY, f"security:{name}"
+    if name in ("setenforce", "set-mppreference"):
+        # Disable operations are denied by the engine; the rest still
+        # require approval.
+        return RiskLevel.R2_PRIVILEGED, f"security:{name}"
+    if (
+        name
+        in (
+            "at",
+            "atq",
+            "atrm",
+            "batch",
+            "crontab",
+            "launchctl",
+            "reg",
+            "schtasks",
+        )
+        or name in _INIT_PERSISTENCE
+    ):
+        return _classify_persistence(name, args)
+    if name == "net":
+        return _classify_net(args)
+    if name in _NET_SHELL_TOOLS:
+        return _classify_net_shell(name, args)
+    if name == "ssh":
+        if _flags(args) & frozenset({"-R", "-D"}):
+            return RiskLevel.R3_DESTRUCTIVE, "ssh:tunnel"
+        return RiskLevel.R2_PRIVILEGED, "remote:ssh"
     if name in _R3_COMMANDS:
         return RiskLevel.R3_DESTRUCTIVE, f"r3:{name}"
     if name in _REMOTE_COMMANDS:
@@ -821,6 +1057,9 @@ class PolicyEngine:
                 reason="privilege escalation is never permitted",
                 policy_id="deny:elevation",
             )
+        security = _security_control_verdict(spec.argv)
+        if security is not None:
+            return security
         violation = confinement_violation(spec.cwd, self._config.workspace_root)
         if violation is not None:
             return PolicyVerdict(
