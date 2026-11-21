@@ -149,8 +149,17 @@ jobs:
         run: uv run --locked playwright install ${{ matrix.os == 'Linux' && '--with-deps chromium' || 'chromium' }}
 
       - name: Run Playwright
+        if: matrix.os != 'Windows'
         run: >-
           uv run --locked pytest e2e -v --tb=short
+
+      # Windows: the pytest process can hang in Playwright's proactor loop
+      # close after the suite passes (PR #75 cancels at 50m/75m); the
+      # watchdog kills the tree 30s after the final summary line.
+      - name: Run Playwright (Windows exit watchdog)
+        if: matrix.os == 'Windows'
+        run: >-
+          uv run --locked python e2e/pytest_exit_watchdog.py e2e -v --tb=short
           -o thread_dump_timeout=10 --durations=20
           --tracing=retain-on-failure --screenshot=only-on-failure
           --full-page-screenshot --output=test-results
