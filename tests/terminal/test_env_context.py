@@ -1,7 +1,9 @@
 """Environment context collector and prompt integration."""
 
 import json
+import os
 import subprocess
+from pathlib import Path
 
 from free_claude_code.terminal.env_context import (
     EnvContext,
@@ -84,13 +86,18 @@ def test_propose_plan_threads_context_to_model():
     assert "Platform: Linux" in seen[0]
 
 
-def test_collects_terminal_repo_root_and_path_count(tmp_path, monkeypatch):
+def test_collects_terminal_and_repo_root(tmp_path, monkeypatch):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     monkeypatch.setenv("TERM_PROGRAM", "ghostty")
-    monkeypatch.setenv("PATH", "/usr/bin:/bin:/usr/local/bin")
     context = collect_env_context(str(tmp_path))
     assert context.terminal == "ghostty"
-    assert context.repo_root == str(tmp_path.resolve())
+    assert context.repo_root is not None
+    assert Path(os.path.realpath(context.repo_root)) == Path(os.path.realpath(tmp_path))
+
+
+def test_path_entry_count(monkeypatch):
+    monkeypatch.setenv("PATH", os.pathsep.join(["a", "b", "", "c"]))
+    context = collect_env_context(".")
     assert context.path_entries == 3
 
 
