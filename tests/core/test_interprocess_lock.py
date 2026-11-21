@@ -4,6 +4,7 @@ import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import BinaryIO, cast
 
 import pytest
 
@@ -102,7 +103,7 @@ def test_windows_try_lock_treats_contention_as_unavailable(
 
     monkeypatch.setattr(msvcrt, "locking", denied)
     try:
-        assert interprocess_lock._try_lock(handle) is False
+        assert interprocess_lock._try_lock(cast(BinaryIO, handle)) is False
     finally:
         handle.close()
 
@@ -135,6 +136,6 @@ def test_windows_try_lock_tolerates_the_sentinel_initialization_race(
 
     handle = RacyHandle(tmp_path / "chat.lock")
     try:
-        assert interprocess_lock._try_lock(handle) is False
+        assert interprocess_lock._try_lock(cast(BinaryIO, handle)) is False
     finally:
         handle.close()
