@@ -10,9 +10,10 @@ from pathlib import Path
 
 import pytest
 import uvicorn
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Playwright, expect
 
 from e2e.code_support import CodeControl
+from e2e.playwright_session import session_playwright
 from e2e.server_shutdown import join_server
 from free_claude_code.api.app import create_app
 from free_claude_code.api.ports import ApiServices
@@ -43,6 +44,14 @@ from free_claude_code.runtime.configuration import ConfigurationService
 from free_claude_code.runtime.folder_picker import NativeFolderPicker
 from free_claude_code.runtime.provider_manager import ProviderRuntimeManager
 from tests.web_tools_support import StubWebToolsClient
+
+
+@pytest.fixture(scope="session")
+def playwright() -> Iterator[Playwright]:
+    # Shadows pytest-playwright's session fixture with a bounded stop: on
+    # Windows the unguarded pw.stop() can hang forever in the proactor close
+    # (issue #82), taking down the whole e2e leg during teardown.
+    yield from session_playwright()
 
 
 class _ModelListingProvider(BaseProvider):
