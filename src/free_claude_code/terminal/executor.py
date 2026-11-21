@@ -116,6 +116,7 @@ class TerminalExecutor:
             pty_active = use_pty and processes.pty_supported()
             if process.stdout is None or (process.stderr is None and not pty_active):
                 processes.kill_tree(process)
+                processes.close_pty_slave(process)
                 processes.untrack(process)
                 self._sink.record(
                     make_event(
@@ -152,6 +153,10 @@ class TerminalExecutor:
             try:
                 timed_out, cancelled = self._await_exit(process, spec, cancel_event)
             finally:
+                # Release the parent-held pty slave before joining readers:
+                # only then can the master end-of-stream, and all buffered
+                # child output drains first (macOS discards it on EIO).
+                processes.close_pty_slave(process)
                 for reader in readers:
                     reader.join(timeout=5.0)
                 for pipe in (process.stdout, process.stderr):
