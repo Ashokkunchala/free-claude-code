@@ -86,6 +86,7 @@ class RunStep:
     timeout_seconds: float | None = None
     verify: VerifySpec | None = None
     rollback: VerifySpec | None = None
+    depends_on: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: Any, *, index: int) -> RunStep:
@@ -118,6 +119,13 @@ class RunStep:
             if rollback_raw is not None
             else None
         )
+        depends_raw = data.get("depends_on")
+        if depends_raw is None:
+            depends_raw = []
+        if not isinstance(depends_raw, list) or any(
+            not isinstance(dep, str) or not dep for dep in depends_raw
+        ):
+            raise PlanError(f"{where}: depends_on must be an array of strings")
         return cls(
             step_id=step_id,
             title=title,
@@ -126,6 +134,7 @@ class RunStep:
             timeout_seconds=float(timeout) if timeout is not None else None,
             verify=verify,
             rollback=rollback,
+            depends_on=tuple(dict.fromkeys(depends_raw)),
         )
 
 
@@ -153,7 +162,47 @@ class RunPlan:
         ids = [step.step_id for step in steps]
         if len(set(ids)) != len(ids):
             raise PlanError("step ids must be unique")
+        known = set(ids)
+        for step in steps:
+            for dep in step.depends_on:
+                if dep not in known:
+                    raise PlanError(f"step {step.step_id}: unknown dependency {dep}")
+        _topological_steps(steps)  # validate the graph is acyclic
         return cls(goal=goal, steps=steps)
+
+    def ordered_steps(self) -> tuple[RunStep, ...]:
+        """Steps in dependency order, stable for independent steps.
+
+        Raises PlanError if the graph cycles; plans built via from_dict
+        are already validated.
+        """
+        return _topological_steps(self.steps)
+
+
+def _topological_steps(steps: tuple[RunStep, ...]) -> tuple[RunStep, ...]:
+    """Kahn's algorithm; declared order breaks ties between ready steps."""
+    by_id = {step.step_id: step for step in steps}
+    indegree = {step.step_id: 0 for step in steps}
+    dependents: dict[str, list[str]] = {step.step_id: [] for step in steps}
+    for step in steps:
+        for dep in step.depends_on:
+            if dep not in by_id:
+                raise PlanError(f"step {step.step_id}: unknown dependency {dep}")
+            indegree[step.step_id] += 1
+            dependents[dep].append(step.step_id)
+    ready = [step.step_id for step in steps if indegree[step.step_id] == 0]
+    ordered: list[RunStep] = []
+    while ready:
+        current = ready.pop(0)
+        ordered.append(by_id[current])
+        for nxt in dependents[current]:
+            indegree[nxt] -= 1
+            if indegree[nxt] == 0:
+                ready.append(nxt)
+    if len(ordered) != len(steps):
+        cycle = sorted(sid for sid, deg in indegree.items() if deg > 0)
+        raise PlanError(f"dependency cycle among steps: {', '.join(cycle)}")
+    return tuple(ordered)
 
 
 def _argv_of(value: Any, *, where: str) -> tuple[str, ...]:
@@ -366,11 +415,12 @@ class RunEngine:
     def run(self, plan: RunPlan, *, task_id: str) -> RunReport:
         """Execute a plan; stop safely at the first step that cannot pass."""
 
+        ordered = plan.ordered_steps()
         reports: list[StepReport] = []
         completed: list[tuple[RunStep, int]] = []
         status = STATUS_OK
-        for index, step in enumerate(plan.steps):
-            residual = tuple(s.step_id for s in plan.steps[index + 1 :])
+        for index, step in enumerate(ordered):
+            residual = tuple(s.step_id for s in ordered[index + 1 :])
             try:
                 spec = self._spec_for(step)
             except ValueError as exc:
