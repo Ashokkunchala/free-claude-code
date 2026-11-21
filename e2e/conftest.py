@@ -394,8 +394,16 @@ def close_browser_connections_before_server_teardown(
         page.unroute_all(behavior="ignoreErrors")
         page.context.unroute_all(behavior="ignoreErrors")
         page.goto("about:blank")
-        # Drain route-handler tasks that were scheduled but not yet running:
-        # unroute_all waits only for handlers already in flight, and a coroutine
-        # still pending when the event loop closes fails teardown with
-        # PytestUnraisableExceptionWarning on loaded Windows CI runners.
-        page.wait_for_timeout(250)
+        # Flush instead of a fixed drain (#78's 250ms wait still lost the race
+        # on loaded runners: a route-handler or response-waiter coroutine
+        # scheduled but not yet running fails teardown with
+        # PytestUnraisableExceptionWarning when the loop closes). An evaluate
+        # round-trip forces the driver to process every message received
+        # before it and the event loop to run every callback already
+        # scheduled, so the first pass lets pending handler tasks settle and
+        # the second proves quiescence before the context closes. It must be
+        # a plain protocol round-trip: requestAnimationFrame never fires in
+        # headless Chromium without frame production and stalled teardown
+        # for 600s on Windows (run 44922149759).
+        page.evaluate("() => 1")
+        page.evaluate("() => 1")
