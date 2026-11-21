@@ -202,4 +202,4 @@ def test_windows_playwright_gets_a_longer_job_timeout() -> None:
     timeouts = {
         entry["os"]: entry["timeout"] for entry in job["strategy"]["matrix"]["include"]
     }
-    assert timeouts == {"Linux": 15, "Windows": 35, "macOS": 15}
+    assert timeouts == {"Linux": 15, "Windows": 50, "macOS": 15}
