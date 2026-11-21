@@ -385,3 +385,8 @@ def close_browser_connections_before_server_teardown(
         page.unroute_all(behavior="ignoreErrors")
         page.context.unroute_all(behavior="ignoreErrors")
         page.goto("about:blank")
+        # Drain route-handler tasks that were scheduled but not yet running:
+        # unroute_all waits only for handlers already in flight, and a coroutine
+        # still pending when the event loop closes fails teardown with
+        # PytestUnraisableExceptionWarning on loaded Windows CI runners.
+        page.wait_for_timeout(250)
