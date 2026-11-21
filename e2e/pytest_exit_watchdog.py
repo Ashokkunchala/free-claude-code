@@ -15,8 +15,6 @@ diagnostics. On healthy runs this is a pure pass-through: stream output,
 propagate the child's exit code.
 """
 
-from __future__ import annotations
-
 import os
 import re
 import signal
