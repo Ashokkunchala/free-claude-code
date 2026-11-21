@@ -216,8 +216,16 @@ class ProviderExecutor:
         *,
         raw_log_payload: Callable[[], object],
         request_id: str,
+        buffered: bool = False,
     ) -> AsyncIterator[str]:
-        """Execute one Anthropic Messages request."""
+        """Execute one Anthropic Messages request.
+
+        With ``buffered=True`` each candidate's chunks are held until that
+        candidate completes, so a mid-stream failure can still fall back to
+        the next candidate: nothing has been delivered to the caller yet.
+        Use it for consumers that aggregate the stream privately (for
+        example non-streaming requests).
+        """
 
         primary_request = routed.request.model_copy(deep=True)
         input_tokens = self._token_counter(
@@ -263,6 +271,7 @@ class ProviderExecutor:
             ingress_count=len(routed.request.messages),
             request_id=request_id,
             open_candidate=open_candidate,
+            buffered=buffered,
         )
 
     def stream_responses(
@@ -339,8 +348,15 @@ class ProviderExecutor:
         ingress_count: int,
         request_id: str,
         open_candidate: CandidateStreamOpener,
+        buffered: bool = False,
     ) -> AsyncIterator[str]:
-        """Start and consume candidates through one protocol-blind lifecycle."""
+        """Start and consume candidates through one protocol-blind lifecycle.
+
+        With ``buffered=True`` candidate output is released only after the
+        candidate finishes, which keeps mid-stream failures recoverable by
+        the next candidate.  Without it the first chunk commits the
+        candidate because the caller may already have received it.
+        """
 
         primary = resolved.primary
         automatic_start = 1 + len(resolved.fallbacks)
@@ -402,6 +418,7 @@ class ProviderExecutor:
                 provider_stream: AsyncIterator[str] | None = None
                 candidate_committed = False
                 candidate_failure: ExecutionFailure | None = None
+                buffered_chunks: list[str] = []
                 try:
                     opening_started = monotonic()
                     try:
@@ -461,7 +478,10 @@ class ProviderExecutor:
                                     candidate_index=index + 1,
                                     candidate_count=len(candidates),
                                 )
-                        yield chunk
+                        if buffered:
+                            buffered_chunks.append(chunk)
+                        else:
+                            yield chunk
                         progress_deadline = loop.time() + self._progress_timeout_seconds
                 finally:
                     if provider_stream is not None:
@@ -487,11 +507,17 @@ class ProviderExecutor:
                             ) from exc
 
                 if candidate_failure is None:
+                    for buffered_chunk in buffered_chunks:
+                        yield buffered_chunk
                     return
                 automatic_enabled = automatic_enabled or _is_automatic_route_failure(
                     candidate_failure
                 )
-                if candidate_committed or index + 1 >= len(candidates):
+                # Buffered delivery has released nothing, so a mid-stream
+                # failure is still recoverable by the next candidate.
+                if (candidate_committed and not buffered) or index + 1 >= len(
+                    candidates
+                ):
                     raise candidate_failure
                 if index + 1 >= automatic_start and not automatic_enabled:
                     raise candidate_failure

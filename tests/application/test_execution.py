@@ -870,6 +870,85 @@ async def test_failure_after_first_frame_never_selects_fallback() -> None:
 
 
 @pytest.mark.asyncio
+async def test_buffered_failure_after_first_frame_selects_fallback() -> None:
+    primary = ControlledProvider(["first-frame", _execution_failure("cut mid-stream")])
+    fallback = ControlledProvider(["fallback-frame-1", "fallback-frame-2"])
+    resolved_ids: list[str] = []
+
+    async def resolve(provider_id: str) -> FakeProvider:
+        resolved_ids.append(provider_id)
+        return {"provider": primary, "fallback": fallback}[provider_id]
+
+    executor = ProviderExecutor(resolve, progress_timeout_seconds=60.0)
+    chunks = [
+        chunk
+        async for chunk in executor.stream_messages(
+            _routed_request(_target("fallback", "model")),
+            raw_log_payload=dict,
+            request_id="req_buffered_fallback",
+            buffered=True,
+        )
+    ]
+
+    # The primary's partial frame was never delivered to the caller.
+    assert chunks == ["fallback-frame-1", "fallback-frame-2"]
+    assert resolved_ids == ["provider", "fallback"]
+    assert primary.stream_close_calls == 1
+    assert fallback.stream_close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_buffered_success_yields_all_frames() -> None:
+    primary = ControlledProvider(["frame-1", "frame-2"])
+
+    async def resolve(provider_id: str) -> FakeProvider:
+        assert provider_id == "provider"
+        return primary
+
+    executor = ProviderExecutor(resolve, progress_timeout_seconds=60.0)
+    chunks = [
+        chunk
+        async for chunk in executor.stream_messages(
+            _routed_request(),
+            raw_log_payload=dict,
+            request_id="req_buffered_success",
+            buffered=True,
+        )
+    ]
+
+    assert chunks == ["frame-1", "frame-2"]
+    assert primary.stream_close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_buffered_exhaustion_raises_last_failure() -> None:
+    primary_failure = _execution_failure("primary cut mid-stream")
+    fallback_failure = _execution_failure("fallback overloaded")
+    primary = ControlledProvider(["first-frame", primary_failure])
+    fallback = ControlledProvider([fallback_failure])
+    providers = {"provider": primary, "fallback": fallback}
+    executor = ProviderExecutor(
+        AsyncMock(side_effect=providers.__getitem__),
+        progress_timeout_seconds=60.0,
+    )
+
+    with pytest.raises(ExecutionFailure) as exc_info:
+        [
+            chunk
+            async for chunk in executor.stream_messages(
+                _routed_request(_target("fallback", "model")),
+                raw_log_payload=dict,
+                request_id="req_buffered_exhausted",
+                buffered=True,
+            )
+        ]
+
+    assert exc_info.value is fallback_failure
+    assert primary.stream_close_calls == 1
+    assert fallback.stream_close_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_lazy_fallback_startup_application_error_stops_unchanged() -> None:
     primary = ControlledProvider([_execution_failure("primary")])
     startup_error = InvalidRequestError("fallback is misconfigured")

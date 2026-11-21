@@ -206,19 +206,47 @@ def test_postframe_failure_never_opens_fallback_for_responses() -> None:
     assert fallback.stream_models == []
 
 
-def test_nonstreaming_partial_failure_discards_content_without_fallback() -> None:
+def test_nonstreaming_partial_failure_falls_back_to_complete_response() -> None:
+    # Non-streaming clients only see the aggregated message, so a candidate
+    # that fails mid-stream has delivered nothing: the next candidate answers.
     partial_text = "PARTIAL_ASSISTANT_OUTPUT"
     partial = text_stream(partial_text, model="nvidia_nim/primary-model")[:3]
     primary = ControlledFallbackProvider(
         chunks_before_failure=tuple(partial),
         failure=execution_failure("primary stream failed"),
     )
-    fallback = ControlledFallbackProvider(text="must not run")
+    fallback = ControlledFallbackProvider(text="fallback worked")
+
+    with fallback_client(primary, fallback) as client:
+        response = client.post("/v1/messages", json=messages_payload(stream=False))
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    body = response.json()
+    assert body["type"] == "message"
+    assert "fallback worked" in response.text
+    assert partial_text not in response.text
+    assert "primary stream failed" not in response.text
+    assert fallback.stream_models == ["fallback-model"]
+    assert primary.close_calls == fallback.close_calls == 1
+
+
+def test_nonstreaming_exhausted_candidates_return_last_typed_error() -> None:
+    partial = text_stream("PARTIAL", model="nvidia_nim/primary-model")[:3]
+    primary = ControlledFallbackProvider(
+        chunks_before_failure=tuple(partial),
+        failure=execution_failure("primary stream failed"),
+    )
+    fallback = ControlledFallbackProvider(
+        failure=execution_failure("fallback overloaded too")
+    )
 
     with fallback_client(primary, fallback) as client:
         response = client.post("/v1/messages", json=messages_payload(stream=False))
 
     assert response.status_code == 529
     assert response.headers["x-should-retry"] == "false"
-    assert partial_text not in response.text
-    assert fallback.stream_models == []
+    body = response.json()
+    assert body["error"]["message"] == "fallback overloaded too"
+    assert "PARTIAL" not in response.text
+    assert primary.close_calls == fallback.close_calls == 1
