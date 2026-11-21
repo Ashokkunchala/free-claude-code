@@ -155,6 +155,10 @@ class MessagesHandler:
                         routed,
                         raw_log_payload=routed.request.model_dump,
                         request_id=request_id,
+                        # Non-streaming clients only see the aggregated
+                        # message, so mid-stream candidate failures may
+                        # still fall back.
+                        buffered=request_data.stream is not True,
                     )
                 )
             return await self._to_public_response(
